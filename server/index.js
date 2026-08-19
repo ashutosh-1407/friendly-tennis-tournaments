@@ -11,6 +11,7 @@ const organizerPasscode = process.env.ORGANIZER_PASSCODE || ''
 const bundledDataDirectory = path.join(root, 'data')
 const dataDirectory = process.env.DATABASE_DIR || bundledDataDirectory
 fs.mkdirSync(dataDirectory, { recursive: true })
+console.log(`Rally data directory: ${dataDirectory}`)
 const db = new Database(path.join(dataDirectory, 'rally.db'))
 db.pragma('journal_mode = WAL')
 db.exec(fs.readFileSync(path.join(root, 'db', 'schema.sql'), 'utf8'))
@@ -28,7 +29,16 @@ const snapshotTables = ['users', 'tournaments', 'tournament_players', 'matches',
 
 // A new Railway Volume starts empty. Seed it once from the deployed snapshot,
 // then all later changes are saved only on the persistent Volume.
-if (path.resolve(dataDirectory) !== path.resolve(bundledDataDirectory) && !fs.existsSync(snapshotPath) && fs.existsSync(bundledSnapshotPath)) {
+const persistentStorageIsEmpty = (() => {
+  if (!fs.existsSync(snapshotPath)) return true
+  try {
+    const snapshot = JSON.parse(fs.readFileSync(snapshotPath, 'utf8'))
+    return !Array.isArray(snapshot.users) || snapshot.users.length === 0
+  } catch {
+    return true
+  }
+})()
+if (path.resolve(dataDirectory) !== path.resolve(bundledDataDirectory) && persistentStorageIsEmpty && fs.existsSync(bundledSnapshotPath)) {
   fs.copyFileSync(bundledSnapshotPath, snapshotPath)
   console.log('Rally data seeded into persistent storage')
 }
