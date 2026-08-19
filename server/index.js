@@ -272,6 +272,7 @@ app.post('/api/tournaments', requireOrganizer, (req, res) => {
 app.get('/api/tournaments', (req, res) => {
   const status = req.query.status
   const userId = req.authUser?.id || 0
+  const organizerViewing = req.authUser?.username?.toLowerCase() === organizerUsername
   const validStatuses = ['upcoming', 'current', 'past']
   let query = 'SELECT t.*, tp.registration_status FROM tournaments t'
   const params = []
@@ -279,7 +280,7 @@ app.get('/api/tournaments', (req, res) => {
   else query += ' LEFT JOIN tournament_players tp ON 1 = 0'
   if (status === 'registered' && Number.isInteger(userId) && userId > 0) query += " WHERE tp.registration_status = 'registered'"
   else if (validStatuses.includes(status)) { query += ' WHERE t.status = ?'; params.push(status) }
-  if (['current', 'past'].includes(status)) {
+  if (['current', 'past'].includes(status) && !organizerViewing) {
     if (Number.isInteger(userId) && userId > 0) query += " AND tp.registration_status = 'registered'"
     else query += ' AND 1 = 0'
   }
@@ -326,7 +327,8 @@ app.get('/api/tournaments/:id', (req, res) => {
   const roundNames = { 2: 'Final', 4: 'Semifinals', 8: 'Quarterfinals', 16: 'Round of 16', 32: 'Round of 32' }
   const rounds = []
   for (let size = bracketSize; size >= 2; size /= 2) rounds.push(roundNames[size] || `Round of ${size}`)
-  res.json({ tournament, players, draw: { visible: publicDrawVisible, visibleAt: visibleAt.toISOString(), organizerPreview, matches, rounds } })
+  const seeds = canViewDraw ? players.filter((player) => player.seed).slice(0, 4) : []
+  res.json({ tournament, players, draw: { visible: publicDrawVisible, visibleAt: visibleAt.toISOString(), organizerPreview, matches, rounds, seeds } })
 })
 
 app.post('/api/tournaments/:id/draw/generate', requireOrganizer, (req, res) => {
@@ -334,23 +336,31 @@ app.post('/api/tournaments/:id/draw/generate', requireOrganizer, (req, res) => {
   const tournament = db.prepare('SELECT id, status FROM tournaments WHERE id = ?').get(tournamentId)
   if (!tournament) return res.status(404).json({ error: 'Tournament not found.' })
   if (tournament.status === 'past') return res.status(400).json({ error: 'Draws cannot be generated for past tournaments.' })
-  const players = db.prepare(`SELECT user_id FROM tournament_players
-    WHERE tournament_id = ? AND registration_status = 'registered' ORDER BY seed IS NULL, seed, user_id`).all(tournamentId)
-  if (players.length < 2) return res.status(400).json({ error: 'At least two registered players are needed for a bracket.' })
-  if (players.length > 32) return res.status(400).json({ error: 'This version supports a maximum of 32 players.' })
-  const bracketSize = 2 ** Math.ceil(Math.log2(players.length))
-  const roundNames = { 2: 'Final', 4: 'Semifinals', 8: 'Quarterfinals', 16: 'Round of 16', 32: 'Round of 32' }
-  const openingRound = roundNames[bracketSize] || `Round of ${bracketSize}`
+  const playerCount = db.prepare("SELECT COUNT(*) AS count FROM tournament_players WHERE tournament_id = ? AND registration_status = 'registered'").get(tournamentId).count
+  if (playerCount < 2) return res.status(400).json({ error: 'At least two registered players are needed for a bracket.' })
+  if (playerCount > 32) return res.status(400).json({ error: 'This version supports a maximum of 32 players.' })
   const generate = db.transaction(() => {
+    db.prepare('UPDATE tournament_players SET seed = NULL WHERE tournament_id = ?').run(tournamentId)
+    const rankedPlayers = db.prepare(`SELECT tp.user_id FROM tournament_players tp
+      JOIN users u ON u.id = tp.user_id
+      WHERE tp.tournament_id = ? AND tp.registration_status = 'registered'
+      ORDER BY u.total_points DESC, u.username COLLATE NOCASE ASC`).all(tournamentId)
+    const assignSeed = db.prepare('UPDATE tournament_players SET seed = ? WHERE tournament_id = ? AND user_id = ?')
+    rankedPlayers.slice(0, 4).forEach((player, index) => assignSeed.run(index + 1, tournamentId, player.user_id))
+    const players = db.prepare(`SELECT user_id FROM tournament_players
+      WHERE tournament_id = ? AND registration_status = 'registered' ORDER BY seed IS NULL, seed, user_id`).all(tournamentId)
+    const bracketSize = 2 ** Math.ceil(Math.log2(players.length))
+    const roundNames = { 2: 'Final', 4: 'Semifinals', 8: 'Quarterfinals', 16: 'Round of 16', 32: 'Round of 32' }
+    const openingRound = roundNames[bracketSize] || `Round of ${bracketSize}`
     db.prepare('DELETE FROM matches WHERE tournament_id = ?').run(tournamentId)
     recalculateTournamentPoints(tournamentId)
     const insert = db.prepare(`INSERT INTO matches (tournament_id, round_name, match_order, player_one_id, player_two_id)
       VALUES (?, ?, ?, ?, ?)`)
     let matchOrder = 1
     for (let left = 0; left + 1 < players.length; left += 2) insert.run(tournamentId, openingRound, matchOrder++, players[left].user_id, players[left + 1].user_id)
-    return matchOrder - 1
+    return { matchesCreated: matchOrder - 1, openingRound, bracketSize }
   })
-  res.json({ matchesCreated: generate(), openingRound, bracketSize })
+  res.json(generate())
 })
 
 app.post('/api/tournaments/:id/draw/publish', requireOrganizer, (req, res) => {
