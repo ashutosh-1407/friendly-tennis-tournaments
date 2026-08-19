@@ -143,6 +143,33 @@ function App() {
     }
   }
 
+  async function resetOrganizerPassword() {
+    const cleanName = draftName.trim()
+    if (cleanName.toLowerCase() !== ORGANIZER_USERNAME || !draftPassword) return
+    const passcode = window.prompt('Enter the organizer passcode to reset this account password')
+    if (!passcode) return
+    setIsSavingUsername(true)
+    setUsernameError('')
+    try {
+      const response = await fetch('/api/auth/reset-organizer-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-rally-organizer-passcode': passcode },
+        body: JSON.stringify({ username: cleanName, password: draftPassword }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Unable to reset the organizer password.')
+      localStorage.setItem(USERNAME_KEY, data.user.username)
+      localStorage.setItem(USER_ID_KEY, data.user.id)
+      setUsername(data.user.username)
+      setUserId(data.user.id)
+      setDraftPassword('')
+    } catch (error) {
+      setUsernameError(error.message)
+    } finally {
+      setIsSavingUsername(false)
+    }
+  }
+
   function changeUser() {
     fetch('/api/auth/signout', { method: 'POST' }).catch(() => {})
     localStorage.removeItem(USERNAME_KEY)
@@ -429,6 +456,7 @@ function App() {
               <input id="password" type="password" value={draftPassword} onChange={(event) => setDraftPassword(event.target.value)} placeholder="At least 6 characters" autoComplete={authMode === 'signin' ? 'current-password' : 'new-password'} minLength="6" maxLength="128" />
             </div>
             <button type="submit" disabled={!draftName.trim() || !draftPassword || isSavingUsername}>{isSavingUsername ? 'Please wait…' : authMode === 'signin' ? <>Sign in <span aria-hidden="true">→</span></> : <>Create account <span aria-hidden="true">→</span></>}</button>
+            {authMode === 'signin' && draftName.trim().toLowerCase() === ORGANIZER_USERNAME && <button type="button" className="organizer-reset" disabled={!draftPassword || isSavingUsername} onClick={resetOrganizerPassword}>Reset organizer password</button>}
           </form>
           {usernameError && <p className="form-error" role="alert">{usernameError}</p>}
           <p className="fine-print">For an old username-only profile, use Sign up once to set its first password.</p>

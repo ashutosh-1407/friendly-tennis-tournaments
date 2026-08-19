@@ -116,6 +116,11 @@ function passwordMatches(password, storedHash) {
   return actual.length === expected.length && timingSafeEqual(Buffer.from(actual, 'hex'), Buffer.from(expected, 'hex'))
 }
 
+function organizerPasscodeMatches(req) {
+  const suppliedPasscode = String(req.header('x-rally-organizer-passcode') || '')
+  return Boolean(organizerPasscode) && suppliedPasscode.length === organizerPasscode.length && timingSafeEqual(Buffer.from(suppliedPasscode), Buffer.from(organizerPasscode))
+}
+
 app.post('/api/auth/signup', (req, res) => {
   const username = String(req.body?.username || '').trim()
   const password = String(req.body?.password || '')
@@ -146,6 +151,24 @@ app.post('/api/auth/signin', (req, res) => {
   const safeUser = { id: user.id, username: user.username, total_points: user.total_points }
   startSession(res, safeUser)
   res.json({ user: safeUser })
+})
+
+app.post('/api/auth/reset-organizer-password', (req, res) => {
+  const username = String(req.body?.username || '').trim().toLowerCase()
+  const password = String(req.body?.password || '')
+  if (username !== organizerUsername) return res.status(403).json({ error: 'Only the organizer account can be reset here.' })
+  const error = validateCredentials(username, password)
+  if (error) return res.status(400).json({ error })
+  if (!organizerPasscode) return res.status(503).json({ error: 'Organizer passcode is not configured on this server.' })
+  if (!organizerPasscodeMatches(req)) return res.status(403).json({ error: 'Incorrect organizer passcode.' })
+  const user = db.prepare('SELECT id, username, total_points FROM users WHERE username = ?').get(organizerUsername)
+  if (!user) return res.status(404).json({ error: 'Organizer account not found.' })
+  db.transaction(() => {
+    db.prepare('UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(hashPassword(password), user.id)
+    db.prepare('DELETE FROM sessions WHERE user_id = ?').run(user.id)
+  })()
+  startSession(res, user)
+  res.json({ user })
 })
 
 app.get('/api/auth/session', (req, res) => res.json({ user: req.authUser || null }))
@@ -181,9 +204,7 @@ function requireOrganizer(req, res, next) {
 
 function isOrganizer(req) {
   const usernameMatches = req.authUser?.username?.toLowerCase() === organizerUsername
-  const suppliedPasscode = String(req.header('x-rally-organizer-passcode') || '')
-  if (!organizerPasscode || suppliedPasscode.length !== organizerPasscode.length) return false
-  return usernameMatches && timingSafeEqual(Buffer.from(suppliedPasscode), Buffer.from(organizerPasscode))
+  return usernameMatches && organizerPasscodeMatches(req)
 }
 
 app.post('/api/tournaments', requireOrganizer, (req, res) => {
