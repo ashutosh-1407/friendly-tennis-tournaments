@@ -8,7 +8,8 @@ import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const organizerUsername = 'ashutosh.1407'
 const organizerPasscode = process.env.ORGANIZER_PASSCODE || ''
-const dataDirectory = process.env.DATABASE_DIR || path.join(root, 'data')
+const bundledDataDirectory = path.join(root, 'data')
+const dataDirectory = process.env.DATABASE_DIR || bundledDataDirectory
 fs.mkdirSync(dataDirectory, { recursive: true })
 const db = new Database(path.join(dataDirectory, 'rally.db'))
 db.pragma('journal_mode = WAL')
@@ -22,7 +23,15 @@ if (!db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name = 'password
 }
 
 const snapshotPath = path.join(dataDirectory, 'rally.json')
+const bundledSnapshotPath = path.join(bundledDataDirectory, 'rally.json')
 const snapshotTables = ['users', 'tournaments', 'tournament_players', 'matches', 'match_results', 'sessions']
+
+// A new Railway Volume starts empty. Seed it once from the deployed snapshot,
+// then all later changes are saved only on the persistent Volume.
+if (path.resolve(dataDirectory) !== path.resolve(bundledDataDirectory) && !fs.existsSync(snapshotPath) && fs.existsSync(bundledSnapshotPath)) {
+  fs.copyFileSync(bundledSnapshotPath, snapshotPath)
+  console.log('Rally data seeded into persistent storage')
+}
 
 function persistDatabase() {
   const snapshot = { version: 1, savedAt: new Date().toISOString() }
