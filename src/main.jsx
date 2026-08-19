@@ -10,6 +10,7 @@ const TOURNAMENT_TIERS = {
   rally_250: { label: 'Rally 250 · Court Sprint', points: 250, maxPlayers: 16, days: 1, scoring: 'One set' },
   rally_500: { label: 'Rally 500 · Weekend Classic', points: 500, maxPlayers: 32, days: 2, scoring: 'Best of three' },
 }
+const USERS_PER_PAGE = 10
 
 function TennisBall() {
   return <span className="tennis-ball" aria-hidden="true"><i /><b /></span>
@@ -106,6 +107,9 @@ function App() {
   const [scoreError, setScoreError] = React.useState('')
   const [isSavingScore, setIsSavingScore] = React.useState(false)
   const [leaderboardPlayers, setLeaderboardPlayers] = React.useState([])
+  const [registeredUsers, setRegisteredUsers] = React.useState([])
+  const [usersError, setUsersError] = React.useState('')
+  const [usersPage, setUsersPage] = React.useState(1)
 
   function requestOrganizerPasscode() {
     if (organizerPasscode) return organizerPasscode
@@ -222,6 +226,24 @@ function App() {
       .then((data) => setLeaderboardPlayers(data.players || []))
       .catch(() => setLeaderboardPlayers([]))
   }, [activeTab, detailVersion])
+
+  React.useEffect(() => {
+    if (activeTab !== 'users' || !isOrganizer) return
+    const passcode = requestOrganizerPasscode()
+    if (!passcode) {
+      setUsersError('An organizer passcode is required to view registered users.')
+      return
+    }
+    setUsersError('')
+    fetch('/api/organizer/users', { headers: { 'x-rally-organizer-passcode': passcode } })
+      .then(async (response) => {
+        const data = await response.json()
+        if (!response.ok) throw new Error(data.error || 'Unable to load users.')
+        return data
+      })
+      .then((data) => { setRegisteredUsers(data.users); setUsersPage(1) })
+      .catch((error) => setUsersError(error.message))
+  }, [activeTab, isOrganizer, organizerPasscode])
 
   async function registerForTournament(tournament) {
     setRegistrationError('')
@@ -444,6 +466,9 @@ function App() {
     }
   }
 
+  const usersPageCount = Math.max(1, Math.ceil(registeredUsers.length / USERS_PER_PAGE))
+  const visibleUsers = registeredUsers.slice((usersPage - 1) * USERS_PER_PAGE, usersPage * USERS_PER_PAGE)
+
   if (!username) {
     if (isCheckingSession) return <main className="welcome-shell"><section className="welcome-card"><div className="brand brand--large"><TennisBall /><span>rally</span></div><p className="intro">Checking your sign-in…</p></section></main>
     return (
@@ -485,6 +510,7 @@ function App() {
         <nav aria-label="Main navigation">
           <button className={activeTab === 'tournaments' ? 'active' : ''} onClick={() => selectTab('tournaments')}>Tournaments</button>
           <button className={activeTab === 'leaderboard' ? 'active' : ''} onClick={() => selectTab('leaderboard')}>Leaderboard</button>
+          {isOrganizer && <button className={activeTab === 'users' ? 'active' : ''} onClick={() => selectTab('users')}>Users</button>}
         </nav>
         <button className="profile" onClick={changeUser} title="Use a different username"><span className="avatar">{username.slice(0, 1).toUpperCase()}</span><span>@{username}</span><span className="switch">Switch</span></button>
       </header>
@@ -508,6 +534,11 @@ function App() {
             {creationError && <p className="creation-error" role="alert">{creationError}</p>}
             <div className="form-actions"><button type="button" className="cancel-button" onClick={() => selectTab('tournaments')}>Cancel</button><button type="submit" className="primary-action" disabled={isCreating}>{isCreating ? 'Creating…' : 'Create tournament'}</button></div>
           </form>
+        </section>
+      ) : activeTab === 'users' && isOrganizer ? (
+        <section className="page" aria-labelledby="users-title">
+          <div className="page-heading"><div><p className="eyebrow">ORGANIZER TOOLS</p><h1 id="users-title">Registered users</h1><p>{registeredUsers.length} players in Rally.</p></div></div>
+          {usersError ? <p className="creation-error">{usersError}</p> : <><div className="users-table">{visibleUsers.map((player) => <div className="user-row" key={player.id}><span className="mini-avatar">{player.username[0].toUpperCase()}</span><strong>@{player.username}</strong><span>{player.tournaments_joined} tournaments</span><span>{player.total_points} pts</span></div>)}</div>{registeredUsers.length > USERS_PER_PAGE && <div className="pagination"><button className="secondary-action" disabled={usersPage === 1} onClick={() => setUsersPage((page) => page - 1)}>← Previous</button><span>Page {usersPage} of {usersPageCount}</span><button className="secondary-action" disabled={usersPage === usersPageCount} onClick={() => setUsersPage((page) => page + 1)}>Next →</button></div>}</>}
         </section>
       ) : activeTab === 'tournaments' ? (
         <section className="page" aria-labelledby="tournaments-title">

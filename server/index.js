@@ -234,6 +234,15 @@ app.get('/api/users', (req, res) => {
   res.json({ user })
 })
 
+app.get('/api/organizer/users', requireOrganizer, (_req, res) => {
+  const users = db.prepare(`SELECT u.id, u.username, u.total_points, u.created_at,
+    COUNT(DISTINCT CASE WHEN tp.registration_status = 'registered' THEN tp.tournament_id END) AS tournaments_joined
+    FROM users u LEFT JOIN tournament_players tp ON tp.user_id = u.id
+    GROUP BY u.id, u.username, u.total_points, u.created_at
+    ORDER BY u.username COLLATE NOCASE ASC`).all()
+  res.json({ users })
+})
+
 // Management requires both the organizer username and a server-side passcode.
 function requireOrganizer(req, res, next) {
   if (!organizerPasscode) {
