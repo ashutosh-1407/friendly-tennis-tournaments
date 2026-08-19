@@ -8,6 +8,10 @@ import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const organizerUsername = 'ashutosh.1407'
 const organizerPasscode = process.env.ORGANIZER_PASSCODE || ''
+const tournamentTiers = {
+  rally_250: { label: 'Rally 250 · Court Sprint', points: 250, maxPlayers: 16, days: 1, scoring: 'single_set' },
+  rally_500: { label: 'Rally 500 · Weekend Classic', points: 500, maxPlayers: 32, days: 2, scoring: 'best_of_three' },
+}
 const bundledDataDirectory = path.join(root, 'data')
 const dataDirectory = process.env.DATABASE_DIR || bundledDataDirectory
 fs.mkdirSync(dataDirectory, { recursive: true })
@@ -21,6 +25,9 @@ if (!db.prepare("SELECT 1 FROM pragma_table_info('tournaments') WHERE name = 'dr
 }
 if (!db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name = 'password_hash'").get()) {
   db.exec('ALTER TABLE users ADD COLUMN password_hash TEXT')
+}
+if (!db.prepare("SELECT 1 FROM pragma_table_info('tournaments') WHERE name = 'tournament_tier'").get()) {
+  db.exec("ALTER TABLE tournaments ADD COLUMN tournament_tier TEXT NOT NULL DEFAULT 'rally_500' CHECK (tournament_tier IN ('rally_250', 'rally_500'))")
 }
 
 const snapshotPath = path.join(dataDirectory, 'rally.json')
@@ -237,15 +244,17 @@ function isOrganizer(req) {
 app.post('/api/tournaments', requireOrganizer, (req, res) => {
   const name = String(req.body?.name || '').trim()
   const startDate = String(req.body?.startDate || '').trim()
-  const endDate = String(req.body?.endDate || '').trim()
+  const tierKey = String(req.body?.tournamentTier || 'rally_500')
+  const tier = tournamentTiers[tierKey]
   const location = String(req.body?.location || '').trim() || null
   const description = String(req.body?.description || '').trim() || null
-  const maxPlayers = req.body?.maxPlayers ? Number(req.body.maxPlayers) : null
   if (!name || name.length > 100) return res.status(400).json({ error: 'Tournament name is required (up to 100 characters).' })
   const isValidDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T12:00:00Z`))
-  if (!isValidDate(startDate) || !isValidDate(endDate)) return res.status(400).json({ error: 'Choose valid start and end dates.' })
-  if (endDate < startDate) return res.status(400).json({ error: 'The end date cannot be before the start date.' })
-  if (maxPlayers !== null && (!Number.isInteger(maxPlayers) || maxPlayers < 2 || maxPlayers > 32)) return res.status(400).json({ error: 'Player limit must be between 2 and 32.' })
+  if (!tier) return res.status(400).json({ error: 'Choose a valid tournament tier.' })
+  if (!isValidDate(startDate)) return res.status(400).json({ error: 'Choose a valid start date.' })
+  const end = new Date(`${startDate}T12:00:00`)
+  end.setDate(end.getDate() + tier.days - 1)
+  const endDate = end.toISOString().slice(0, 10)
 
   const today = new Date().toISOString().slice(0, 10)
   const status = endDate < today ? 'past' : startDate > today ? 'upcoming' : 'current'
@@ -253,10 +262,10 @@ app.post('/api/tournaments', requireOrganizer, (req, res) => {
   if (!organizer) return res.status(400).json({ error: 'Open Rally once as the organizer before creating a tournament.' })
   const registrationClosesAt = new Date(new Date(`${startDate}T09:00:00`).getTime() - 4 * 24 * 60 * 60 * 1000).toISOString()
   const tournament = db.prepare(`
-    INSERT INTO tournaments (name, description, location, starts_at, ends_at, registration_closes_at, status, max_players, created_by_user_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO tournaments (name, description, location, starts_at, ends_at, registration_closes_at, status, tournament_tier, max_players, created_by_user_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     RETURNING *
-  `).get(name, description, location, `${startDate}T09:00:00`, `${endDate}T23:00:00`, registrationClosesAt, status, maxPlayers, organizer.id)
+  `).get(name, description, location, `${startDate}T09:00:00`, `${endDate}T23:00:00`, registrationClosesAt, status, tierKey, tier.maxPlayers, organizer.id)
   res.status(201).json({ tournament })
 })
 
@@ -416,6 +425,8 @@ function advanceWinner(match, winnerUserId) {
 }
 
 function recalculateTournamentPoints(tournamentId) {
+  const tournament = db.prepare('SELECT tournament_tier FROM tournaments WHERE id = ?').get(tournamentId)
+  const totalPoints = tournamentTiers[tournament?.tournament_tier]?.points || 500
   const fieldSize = db.prepare("SELECT COUNT(*) AS count FROM tournament_players WHERE tournament_id = ? AND registration_status = 'registered'").get(tournamentId).count
   if (fieldSize < 2) return
   const bracketSize = 2 ** Math.ceil(Math.log2(fieldSize))
@@ -427,7 +438,7 @@ function recalculateTournamentPoints(tournamentId) {
   const pointsByRound = {}
   let allocated = 0
   rounds.forEach((round, index) => {
-    pointsByRound[round] = index === rounds.length - 1 ? 500 - allocated : Math.floor(500 * weights[index] / totalWeight)
+    pointsByRound[round] = index === rounds.length - 1 ? totalPoints - allocated : Math.floor(totalPoints * weights[index] / totalWeight)
     allocated += pointsByRound[round]
   })
   const earned = new Map()
@@ -448,13 +459,28 @@ function recalculateTournamentPoints(tournamentId) {
 app.post('/api/matches/:id/result', requireUser, (req, res) => {
   const match = db.prepare('SELECT * FROM matches WHERE id = ?').get(Number(req.params.id))
   if (!match) return res.status(404).json({ error: 'Match not found.' })
-  const tournament = db.prepare('SELECT status FROM tournaments WHERE id = ?').get(match.tournament_id)
+  const tournament = db.prepare('SELECT status, tournament_tier FROM tournaments WHERE id = ?').get(match.tournament_id)
   if (tournament?.status !== 'current') return res.status(400).json({ error: 'Scores can only be entered for current tournaments.' })
   const user = req.authUser
   if (!user || (!isOrganizer(req) && user.id !== match.player_one_id && user.id !== match.player_two_id)) return res.status(403).json({ error: 'Only a player in this match or the organizer can enter its score.' })
   const sets = Array.isArray(req.body?.sets) ? req.body.sets : []
-  if (sets.length !== 3 || !validStandardSet(sets[0]) || !validStandardSet(sets[1])) return res.status(400).json({ error: 'Enter two valid tennis set scores.' })
-  const firstTwoWinners = sets.slice(0, 2).map((set) => Number(set.playerOneGames) > Number(set.playerTwoGames) ? 1 : 2)
+  const isSingleSet = tournament.tournament_tier === 'rally_250'
+  if (isSingleSet && (sets.length !== 1 || !validStandardSet(sets[0]))) return res.status(400).json({ error: 'Enter one valid tennis set score.' })
+  if (!isSingleSet && (sets.length !== 3 || !validStandardSet(sets[0]) || !validStandardSet(sets[1]))) return res.status(400).json({ error: 'Enter two valid tennis set scores.' })
+  const firstTwoWinners = sets.slice(0, isSingleSet ? 1 : 2).map((set) => Number(set.playerOneGames) > Number(set.playerTwoGames) ? 1 : 2)
+  if (isSingleSet) {
+    const winnerUserId = firstTwoWinners[0] === 1 ? match.player_one_id : match.player_two_id
+    const scoreFor = (player) => sets.map((set) => player === 1 ? set.playerOneGames : set.playerTwoGames).join(' ')
+    const saveResult = db.transaction(() => {
+      db.prepare(`INSERT INTO match_results (match_id, winner_user_id, player_one_score, player_two_score, notes) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(match_id) DO UPDATE SET winner_user_id = excluded.winner_user_id, player_one_score = excluded.player_one_score, player_two_score = excluded.player_two_score, notes = excluded.notes, reported_at = CURRENT_TIMESTAMP`).run(match.id, winnerUserId, scoreFor(1), scoreFor(2), 'Entered in Rally')
+      db.prepare("UPDATE matches SET status = 'completed' WHERE id = ?").run(match.id)
+      advanceWinner(match, winnerUserId)
+      recalculateTournamentPoints(match.tournament_id)
+    })
+    saveResult()
+    return res.json({ completed: true, winnerUserId })
+  }
   const playerOneSets = firstTwoWinners.filter((winner) => winner === 1).length
   const playerTwoSets = 2 - playerOneSets
   const finalSet = sets[2]

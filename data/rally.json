@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "savedAt": "2026-08-19T06:51:53.753Z",
+  "savedAt": "2026-08-19T07:56:31.488Z",
   "users": [
     {
       "id": 1,
       "username": "ashutosh.1407",
       "total_points": 0,
       "created_at": "2026-08-18 00:43:02",
-      "updated_at": "2026-08-19 06:51:53",
-      "password_hash": "bbcf0080e22100ddf9cc50c7d16f0d13:8cbf4732d822f9bcd6c3eb4d8456d00c60a393e5c377e24e77fb7ad8726a99025398df4aa64d4e2e9e48a74bf642efcf4dfbb1e3613145aaf5c58c85bcd17c28"
+      "updated_at": "2026-08-19 07:55:56",
+      "password_hash": "6b3222b32879b3cea0aa6590ffcc64f5:0acf56fd0d00b18f8cc8b50aa044eea22b2dd2c5338d0996f8b45fe132c01adc93dd123c0d1871a50cbc0cccc4937e5c52e96da7fa2c33662e83361af713aa75"
     },
     {
       "id": 2,
@@ -39,7 +39,7 @@
       "username": "Alex",
       "total_points": 0,
       "created_at": "2026-08-18 00:58:47",
-      "updated_at": "2026-08-19 04:40:43",
+      "updated_at": "2026-08-19 07:55:56",
       "password_hash": null
     },
     {
@@ -47,7 +47,7 @@
       "username": "Mike",
       "total_points": 500,
       "created_at": "2026-08-18 00:58:47",
-      "updated_at": "2026-08-19 04:00:22",
+      "updated_at": "2026-08-19 07:55:56",
       "password_hash": null
     },
     {
@@ -79,7 +79,7 @@
       "username": "Amir",
       "total_points": 213,
       "created_at": "2026-08-18 00:58:47",
-      "updated_at": "2026-08-19 04:00:22",
+      "updated_at": "2026-08-19 07:55:56",
       "password_hash": null
     },
     {
@@ -170,7 +170,8 @@
       "created_by_user_id": 1,
       "created_at": "2026-08-18 00:48:17",
       "updated_at": "2026-08-19 05:39:14",
-      "draw_published_at": null
+      "draw_published_at": null,
+      "tournament_tier": "rally_500"
     },
     {
       "id": 2,
@@ -186,7 +187,8 @@
       "created_by_user_id": 1,
       "created_at": "2026-08-19 04:00:22",
       "updated_at": "2026-08-19 04:00:22",
-      "draw_published_at": "2026-08-19 04:00:22"
+      "draw_published_at": "2026-08-19 04:00:22",
+      "tournament_tier": "rally_500"
     },
     {
       "id": 3,
@@ -202,7 +204,8 @@
       "created_by_user_id": 1,
       "created_at": "2026-08-19 04:04:43",
       "updated_at": "2026-08-19 04:12:58",
-      "draw_published_at": null
+      "draw_published_at": null,
+      "tournament_tier": "rally_500"
     },
     {
       "id": 4,
@@ -218,7 +221,8 @@
       "created_by_user_id": 1,
       "created_at": "2026-08-19 04:04:43",
       "updated_at": "2026-08-19 04:04:43",
-      "draw_published_at": null
+      "draw_published_at": null,
+      "tournament_tier": "rally_500"
     }
   ],
   "tournament_players": [
@@ -706,10 +710,10 @@
   ],
   "sessions": [
     {
-      "token": "6072edad2e5f734559f7b4d161aa3d860f86a04b79a56800703ed58a38d0dd43",
+      "token": "8ccb2a33eb3d839afa94ebc811cfb77d337e5d7e0f5275f1af536269af69abe2",
       "user_id": 1,
-      "expires_at": "2026-09-18T06:51:53.752Z",
-      "created_at": "2026-08-19 06:51:53"
+      "expires_at": "2026-09-18T07:52:52.220Z",
+      "created_at": "2026-08-19 07:52:52"
     }
   ]
 }
