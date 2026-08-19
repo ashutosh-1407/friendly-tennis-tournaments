@@ -110,6 +110,7 @@ function App() {
   const [registeredUsers, setRegisteredUsers] = React.useState([])
   const [usersError, setUsersError] = React.useState('')
   const [usersPage, setUsersPage] = React.useState(1)
+  const [leaderboardPage, setLeaderboardPage] = React.useState(1)
 
   function requestOrganizerPasscode() {
     if (organizerPasscode) return organizerPasscode
@@ -223,7 +224,7 @@ function App() {
     if (activeTab !== 'leaderboard') return
     fetch('/api/leaderboard')
       .then((response) => response.ok ? response.json() : Promise.reject())
-      .then((data) => setLeaderboardPlayers(data.players || []))
+      .then((data) => { setLeaderboardPlayers(data.players || []); setLeaderboardPage(1) })
       .catch(() => setLeaderboardPlayers([]))
   }, [activeTab, detailVersion])
 
@@ -253,6 +254,21 @@ function App() {
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Unable to register.')
       setNotice(`You’re registered for “${tournament.name}”.`)
+    } catch (error) {
+      setRegistrationError(error.message)
+    } finally {
+      setRegistrationPending(null)
+    }
+  }
+
+  async function withdrawFromTournament(tournament) {
+    setRegistrationError('')
+    setRegistrationPending(tournament.id)
+    try {
+      const response = await fetch(`/api/tournaments/${tournament.id}/registrations`, { method: 'DELETE', headers: { 'x-rally-username': username } })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Unable to withdraw.')
+      setNotice(`You’ve withdrawn from “${tournament.name}”.`)
     } catch (error) {
       setRegistrationError(error.message)
     } finally {
@@ -468,6 +484,8 @@ function App() {
 
   const usersPageCount = Math.max(1, Math.ceil(registeredUsers.length / USERS_PER_PAGE))
   const visibleUsers = registeredUsers.slice((usersPage - 1) * USERS_PER_PAGE, usersPage * USERS_PER_PAGE)
+  const leaderboardPageCount = Math.max(1, Math.ceil(leaderboardPlayers.length / USERS_PER_PAGE))
+  const visibleLeaderboardPlayers = leaderboardPlayers.slice((leaderboardPage - 1) * USERS_PER_PAGE, leaderboardPage * USERS_PER_PAGE)
 
   if (!username) {
     if (isCheckingSession) return <main className="welcome-shell"><section className="welcome-card"><div className="brand brand--large"><TennisBall /><span>rally</span></div><p className="intro">Checking your sign-in…</p></section></main>
@@ -538,7 +556,7 @@ function App() {
       ) : activeTab === 'users' && isOrganizer ? (
         <section className="page" aria-labelledby="users-title">
           <div className="page-heading"><div><p className="eyebrow">ORGANIZER TOOLS</p><h1 id="users-title">Registered users</h1><p>{registeredUsers.length} players in Rally.</p></div></div>
-          {usersError ? <p className="creation-error">{usersError}</p> : <><div className="users-table">{visibleUsers.map((player) => <div className="user-row" key={player.id}><span className="mini-avatar">{player.username[0].toUpperCase()}</span><strong>@{player.username}</strong><span>{player.tournaments_joined} tournaments</span><span>{player.total_points} pts</span></div>)}</div>{registeredUsers.length > USERS_PER_PAGE && <div className="pagination"><button className="secondary-action" disabled={usersPage === 1} onClick={() => setUsersPage((page) => page - 1)}>← Previous</button><span>Page {usersPage} of {usersPageCount}</span><button className="secondary-action" disabled={usersPage === usersPageCount} onClick={() => setUsersPage((page) => page + 1)}>Next →</button></div>}</>}
+          {usersError ? <p className="creation-error">{usersError}</p> : <><div className="users-table">{visibleUsers.map((player) => <div className="user-row" key={player.id}><strong>@{player.username}</strong><span>{player.total_points} pts</span></div>)}</div>{registeredUsers.length > USERS_PER_PAGE && <div className="pagination"><button className="secondary-action" disabled={usersPage === 1} onClick={() => setUsersPage((page) => page - 1)}>← Previous</button><span>Page {usersPage} of {usersPageCount}</span><button className="secondary-action" disabled={usersPage === usersPageCount} onClick={() => setUsersPage((page) => page + 1)}>Next →</button></div>}</>}
         </section>
       ) : activeTab === 'tournaments' ? (
         <section className="page" aria-labelledby="tournaments-title">
@@ -552,14 +570,14 @@ function App() {
           {notice && <div className="notice" role="status">{notice}</div>}
           {registrationError && <div className="registration-error" role="alert">{registrationError}</div>}
           <div className="empty-state">
-            {isLoadingTournaments ? <p>Loading tournaments…</p> : tournaments.length ? <div className="tournament-list">{tournaments.map((tournament) => <article className="tournament-card" key={tournament.id} onClick={() => openTournament(tournament.id)}><div><p className="card-date">{new Date(tournament.starts_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}{tournament.starts_at.slice(0, 10) !== tournament.ends_at.slice(0, 10) && ` – ${new Date(tournament.ends_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`}</p><h2>{tournament.name}</h2><span className="tier-badge">{TOURNAMENT_TIERS[tournament.tournament_tier]?.label || 'Rally 500 · Weekend Classic'}</span>{tournament.location && <p>{tournament.location}</p>}{tournament.description && <p>{tournament.description}</p>}{registrationDeadlineLabel(tournament) && <p className={registrationHasClosed(tournament) ? 'registration-deadline registration-deadline--closed' : 'registration-deadline'}>{registrationDeadlineLabel(tournament)}</p>}</div><div className="card-action">{tournament.registration_status === 'registered' ? <span className="registered">Registered</span> : tournament.status !== 'past' && (registrationHasClosed(tournament) ? <span className="registration-closed">Registration closed</span> : <button className="secondary-action" disabled={registrationPending === tournament.id} onClick={(event) => { event.stopPropagation(); registerForTournament(tournament) }}>{registrationPending === tournament.id ? 'Registering…' : 'Register'}</button>)}</div></article>)}</div> : <><div className="court-mark"><TennisBall /></div><h2>No {tournamentFilter} tournaments yet</h2><p>{tournamentFilter === 'upcoming' ? 'Check back soon for a friendly match near you.' : `When you have ${tournamentFilter} tournaments, they’ll appear here.`}</p>{tournamentFilter === 'upcoming' && isOrganizer && <button className="secondary-action" onClick={() => selectTab('create')}>Create the first tournament</button>}</>}
+            {isLoadingTournaments ? <p>Loading tournaments…</p> : tournaments.length ? <div className="tournament-list">{tournaments.map((tournament) => <article className="tournament-card" key={tournament.id} onClick={() => openTournament(tournament.id)}><div><p className="card-date">{new Date(tournament.starts_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}{tournament.starts_at.slice(0, 10) !== tournament.ends_at.slice(0, 10) && ` – ${new Date(tournament.ends_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`}</p><h2>{tournament.name}</h2><span className="tier-badge">{TOURNAMENT_TIERS[tournament.tournament_tier]?.label || 'Rally 500 · Weekend Classic'}</span>{tournament.location && <p>{tournament.location}</p>}{tournament.description && <p>{tournament.description}</p>}{registrationDeadlineLabel(tournament) && <p className={registrationHasClosed(tournament) ? 'registration-deadline registration-deadline--closed' : 'registration-deadline'}>{registrationDeadlineLabel(tournament)}</p>}</div><div className="card-action">{tournament.registration_status === 'registered' ? <div className="registration-actions"><span className="registered">Registered</span>{tournament.status !== 'past' && !registrationHasClosed(tournament) && <button className="deregister-action" disabled={registrationPending === tournament.id} onClick={(event) => { event.stopPropagation(); withdrawFromTournament(tournament) }}>{registrationPending === tournament.id ? 'Withdrawing…' : 'Withdraw'}</button>}</div> : tournament.status !== 'past' && (registrationHasClosed(tournament) ? <span className="registration-closed">Registration closed</span> : <button className="secondary-action" disabled={registrationPending === tournament.id} onClick={(event) => { event.stopPropagation(); registerForTournament(tournament) }}>{registrationPending === tournament.id ? 'Registering…' : 'Register'}</button>)}</div></article>)}</div> : <><div className="court-mark"><TennisBall /></div><h2>No {tournamentFilter} tournaments yet</h2><p>{tournamentFilter === 'upcoming' ? 'Check back soon for a friendly match near you.' : `When you have ${tournamentFilter} tournaments, they’ll appear here.`}</p>{tournamentFilter === 'upcoming' && isOrganizer && <button className="secondary-action" onClick={() => selectTab('create')}>Create the first tournament</button>}</>}
           </div>
         </section>
       ) : (
         <section className="page leaderboard" aria-labelledby="leaderboard-title">
           <div className="page-heading"><div><p className="eyebrow">LOCAL RANKINGS</p><h1 id="leaderboard-title">Leaderboard</h1><p>Win matches to earn tournament points.</p></div></div>
           <div className="rating-note"><span>✦</span><div><strong>Win 250 or 500 points, depending on the tournament tier.</strong><p>Later-round wins are worth more; points update as scores are recorded.</p></div></div>
-          {leaderboardPlayers.length ? <div className="leaderboard-table">{leaderboardPlayers.map((player) => <div className="leaderboard-row" key={player.user_id}><span className="leaderboard-rank">{player.rank}</span><span className="mini-avatar">{player.username[0].toUpperCase()}</span><strong>@{player.username}</strong><span className="leaderboard-points">{player.total_points} pts</span></div>)}</div> : <div className="empty-state leaderboard-empty"><div className="trophy">♜</div><h2>The board is waiting</h2><p>Record the first result to begin earning points.</p></div>}
+          {leaderboardPlayers.length ? <><div className="leaderboard-table">{visibleLeaderboardPlayers.map((player) => <div className="leaderboard-row" key={player.user_id}><span className="leaderboard-rank">{player.rank}</span><span className="mini-avatar">{player.username[0].toUpperCase()}</span><strong>@{player.username}</strong><span className="leaderboard-points">{player.total_points} pts</span></div>)}</div>{leaderboardPlayers.length > USERS_PER_PAGE && <div className="pagination"><button className="secondary-action" disabled={leaderboardPage === 1} onClick={() => setLeaderboardPage((page) => page - 1)}>← Previous</button><span>Page {leaderboardPage} of {leaderboardPageCount}</span><button className="secondary-action" disabled={leaderboardPage === leaderboardPageCount} onClick={() => setLeaderboardPage((page) => page + 1)}>Next →</button></div>}</> : <div className="empty-state leaderboard-empty"><div className="trophy">♜</div><h2>The board is waiting</h2><p>Record the first result to begin earning points.</p></div>}
         </section>
       )}
       {scoreMatch && <ScoreEntryModal match={scoreMatch} onClose={() => setScoreMatch(null)} onSave={saveScore} isSaving={isSavingScore} error={scoreError} isSingleSet={tournamentDetail?.tournament?.tournament_tier === 'rally_250'} />}

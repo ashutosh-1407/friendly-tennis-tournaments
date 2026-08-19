@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "savedAt": "2026-08-19T18:10:36.514Z",
+  "savedAt": "2026-08-19T19:15:45.576Z",
   "users": [
     {
       "id": 1,
@@ -420,14 +420,6 @@
     },
     {
       "tournament_id": 4,
-      "user_id": 3,
-      "registration_status": "registered",
-      "seed": null,
-      "points_earned": 0,
-      "registered_at": "2026-08-19 04:04:43"
-    },
-    {
-      "tournament_id": 4,
       "user_id": 4,
       "registration_status": "registered",
       "seed": null,
@@ -481,6 +473,14 @@
       "seed": null,
       "points_earned": 0,
       "registered_at": "2026-08-19 04:04:43"
+    },
+    {
+      "tournament_id": 4,
+      "user_id": 1,
+      "registration_status": "registered",
+      "seed": null,
+      "points_earned": 0,
+      "registered_at": "2026-08-19 19:15:37"
     }
   ],
   "matches": [
@@ -560,50 +560,6 @@
       "scheduled_at": null,
       "status": "completed",
       "created_at": "2026-08-19 04:00:22"
-    },
-    {
-      "id": 16,
-      "tournament_id": 4,
-      "round_name": "Quarterfinals",
-      "match_order": 1,
-      "player_one_id": 3,
-      "player_two_id": 4,
-      "scheduled_at": null,
-      "status": "scheduled",
-      "created_at": "2026-08-19 04:09:21"
-    },
-    {
-      "id": 17,
-      "tournament_id": 4,
-      "round_name": "Quarterfinals",
-      "match_order": 2,
-      "player_one_id": 5,
-      "player_two_id": 6,
-      "scheduled_at": null,
-      "status": "scheduled",
-      "created_at": "2026-08-19 04:09:21"
-    },
-    {
-      "id": 18,
-      "tournament_id": 4,
-      "round_name": "Quarterfinals",
-      "match_order": 3,
-      "player_one_id": 7,
-      "player_two_id": 8,
-      "scheduled_at": null,
-      "status": "scheduled",
-      "created_at": "2026-08-19 04:09:21"
-    },
-    {
-      "id": 19,
-      "tournament_id": 4,
-      "round_name": "Quarterfinals",
-      "match_order": 4,
-      "player_one_id": 9,
-      "player_two_id": 10,
-      "scheduled_at": null,
-      "status": "scheduled",
-      "created_at": "2026-08-19 04:09:21"
     },
     {
       "id": 28,
@@ -762,10 +718,22 @@
   ],
   "sessions": [
     {
-      "token": "cdcd7ab715a5fae70d3d83b6ae2c7f3ee70ef9e51f0fc991c999b7bf7e400caf",
+      "token": "81be7b952ad88e46a74e0ba5fd7ff5769a1f9a8dce2c6ea5a1351d95efe23e93",
       "user_id": 3,
-      "expires_at": "2026-09-18T18:10:36.514Z",
-      "created_at": "2026-08-19 18:10:36"
+      "expires_at": "2026-09-18T19:06:48.365Z",
+      "created_at": "2026-08-19 19:06:48"
+    },
+    {
+      "token": "f93d979d38251a840de728d3a0d212246ac1032437c38c7e1b69607d933c55a3",
+      "user_id": 3,
+      "expires_at": "2026-09-18T19:09:42.939Z",
+      "created_at": "2026-08-19 19:09:42"
+    },
+    {
+      "token": "21e3074f92badc9ef6a46307abab92a8eadbef9174d508e120bb1200d00ff993",
+      "user_id": 3,
+      "expires_at": "2026-09-18T19:15:45.575Z",
+      "created_at": "2026-08-19 19:15:45"
     }
   ]
 }

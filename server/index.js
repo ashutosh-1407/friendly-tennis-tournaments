@@ -235,11 +235,7 @@ app.get('/api/users', (req, res) => {
 })
 
 app.get('/api/organizer/users', requireOrganizer, (_req, res) => {
-  const users = db.prepare(`SELECT u.id, u.username, u.total_points, u.created_at,
-    COUNT(DISTINCT CASE WHEN tp.registration_status = 'registered' THEN tp.tournament_id END) AS tournaments_joined
-    FROM users u LEFT JOIN tournament_players tp ON tp.user_id = u.id
-    GROUP BY u.id, u.username, u.total_points, u.created_at
-    ORDER BY u.username COLLATE NOCASE ASC`).all()
+  const users = db.prepare('SELECT id, username, total_points FROM users ORDER BY total_points DESC, username COLLATE NOCASE ASC').all()
   res.json({ users })
 })
 
@@ -255,8 +251,11 @@ function requireOrganizer(req, res, next) {
 }
 
 function isOrganizer(req) {
-  const usernameMatches = req.authUser?.username?.toLowerCase() === organizerUsername
-  return usernameMatches && organizerPasscodeMatches(req)
+  return isOrganizerAccount(req) && organizerPasscodeMatches(req)
+}
+
+function isOrganizerAccount(req) {
+  return req.authUser?.username?.toLowerCase() === organizerUsername
 }
 
 app.post('/api/tournaments', requireOrganizer, (req, res) => {
@@ -292,7 +291,7 @@ app.get('/api/tournaments', (req, res) => {
   const userId = req.authUser?.id || 0
   const organizerViewing = req.authUser?.username?.toLowerCase() === organizerUsername
   const validStatuses = ['upcoming', 'current', 'past']
-  let query = 'SELECT t.*, tp.registration_status FROM tournaments t'
+  let query = 'SELECT t.*, tp.registration_status, EXISTS(SELECT 1 FROM matches m WHERE m.tournament_id = t.id) AS draw_generated FROM tournaments t'
   const params = []
   if (Number.isInteger(userId) && userId > 0) { query += ' LEFT JOIN tournament_players tp ON tp.tournament_id = t.id AND tp.user_id = ?'; params.push(userId) }
   else query += ' LEFT JOIN tournament_players tp ON 1 = 0'
@@ -322,6 +321,29 @@ app.post('/api/tournaments/:id/registrations', requireUser, (req, res) => {
   res.status(201).json({ registration: 'registered' })
 })
 
+app.delete('/api/tournaments/:id/registrations', requireUser, (req, res) => {
+  const tournamentId = Number(req.params.id)
+  const tournament = db.prepare('SELECT id, status, starts_at, registration_closes_at FROM tournaments WHERE id = ?').get(tournamentId)
+  const user = req.authUser
+  if (!tournament || !user) return res.status(404).json({ error: 'Tournament or player not found.' })
+  if (!['upcoming', 'current'].includes(tournament.status)) return res.status(400).json({ error: 'Registration is closed for this tournament.' })
+
+  const cutoff = tournament.registration_closes_at ? new Date(tournament.registration_closes_at) : new Date(new Date(tournament.starts_at).getTime() - 4 * 24 * 60 * 60 * 1000)
+  if (new Date() >= cutoff) return res.status(400).json({ error: 'You can only withdraw before the registration deadline.' })
+
+  const registration = db.prepare("SELECT 1 FROM tournament_players WHERE tournament_id = ? AND user_id = ? AND registration_status = 'registered'").get(tournamentId, user.id)
+  if (!registration) return res.status(404).json({ error: 'You are not registered for this tournament.' })
+
+  const withdraw = db.transaction(() => {
+    // A provisional draw must reflect the final field, so reset it when a player withdraws.
+    db.prepare('DELETE FROM matches WHERE tournament_id = ?').run(tournamentId)
+    db.prepare("DELETE FROM tournament_players WHERE tournament_id = ? AND user_id = ? AND registration_status = 'registered'").run(tournamentId, user.id)
+    recalculateTournamentPoints(tournamentId)
+  })
+  withdraw()
+  res.json({ registration: 'withdrawn', drawReset: true })
+})
+
 app.get('/api/tournaments/:id', (req, res) => {
   const tournamentId = Number(req.params.id)
   const tournament = db.prepare('SELECT * FROM tournaments WHERE id = ?').get(tournamentId)
@@ -332,7 +354,10 @@ app.get('/api/tournaments/:id', (req, res) => {
     ORDER BY tp.seed IS NULL, tp.seed, u.username COLLATE NOCASE`).all(tournamentId)
   const visibleAt = new Date(new Date(tournament.starts_at).getTime() - 48 * 60 * 60 * 1000)
   const publicDrawVisible = Boolean(tournament.draw_published_at) || new Date() >= visibleAt
-  const organizerPreview = isOrganizer(req)
+  // The signed-in organizer may preview an unpublished bracket. Changing it
+  // (generate, publish, undo, or scoring another player's match) still needs
+  // the separate organizer passcode through requireOrganizer.
+  const organizerPreview = isOrganizerAccount(req)
   const canViewDraw = publicDrawVisible || organizerPreview
   const matches = canViewDraw ? db.prepare(`SELECT m.*, p1.username AS player_one_name, p2.username AS player_two_name,
       r.winner_user_id, winner.username AS winner_name, r.player_one_score, r.player_two_score
