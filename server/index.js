@@ -38,9 +38,26 @@ const persistentStorageIsEmpty = (() => {
     return true
   }
 })()
-if (path.resolve(dataDirectory) !== path.resolve(bundledDataDirectory) && persistentStorageIsEmpty && fs.existsSync(bundledSnapshotPath)) {
-  fs.copyFileSync(bundledSnapshotPath, snapshotPath)
-  console.log('Rally data seeded into persistent storage')
+const forceSeedFromBundle = process.env.FORCE_SEED_FROM_BUNDLE === 'true'
+if (path.resolve(dataDirectory) !== path.resolve(bundledDataDirectory) && (persistentStorageIsEmpty || forceSeedFromBundle) && fs.existsSync(bundledSnapshotPath)) {
+  if (forceSeedFromBundle) {
+    const bundledSnapshot = JSON.parse(fs.readFileSync(bundledSnapshotPath, 'utf8'))
+    // Keep the password just chosen for the organizer while restoring all
+    // tournament data from the bundled snapshot.
+    if (fs.existsSync(snapshotPath)) {
+      try {
+        const currentSnapshot = JSON.parse(fs.readFileSync(snapshotPath, 'utf8'))
+        const currentOrganizer = currentSnapshot.users?.find((user) => user.username?.toLowerCase() === organizerUsername)
+        const bundledOrganizer = bundledSnapshot.users?.find((user) => user.username?.toLowerCase() === organizerUsername)
+        if (currentOrganizer?.password_hash && bundledOrganizer) bundledOrganizer.password_hash = currentOrganizer.password_hash
+      } catch {}
+    }
+    fs.writeFileSync(snapshotPath, JSON.stringify(bundledSnapshot, null, 2))
+    console.log('Rally data force-restored into persistent storage')
+  } else {
+    fs.copyFileSync(bundledSnapshotPath, snapshotPath)
+    console.log('Rally data seeded into persistent storage')
+  }
 }
 
 function persistDatabase() {
