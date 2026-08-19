@@ -12,6 +12,15 @@ const tournamentTiers = {
   rally_250: { label: 'Rally 250 · Court Sprint', points: 250, maxPlayers: 16, days: 1, scoring: 'single_set' },
   rally_500: { label: 'Rally 500 · Weekend Classic', points: 500, maxPlayers: 32, days: 2, scoring: 'best_of_three' },
 }
+
+function shuffle(items) {
+  const shuffled = [...items]
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1))
+    ;[shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]]
+  }
+  return shuffled
+}
 const bundledDataDirectory = path.join(root, 'data')
 const dataDirectory = process.env.DATABASE_DIR || bundledDataDirectory
 fs.mkdirSync(dataDirectory, { recursive: true })
@@ -347,7 +356,7 @@ app.post('/api/tournaments/:id/draw/generate', requireOrganizer, (req, res) => {
       ORDER BY u.total_points DESC, u.username COLLATE NOCASE ASC`).all(tournamentId)
     const assignSeed = db.prepare('UPDATE tournament_players SET seed = ? WHERE tournament_id = ? AND user_id = ?')
     rankedPlayers.slice(0, 4).forEach((player, index) => assignSeed.run(index + 1, tournamentId, player.user_id))
-    const players = db.prepare(`SELECT user_id FROM tournament_players
+    const players = db.prepare(`SELECT user_id, seed FROM tournament_players
       WHERE tournament_id = ? AND registration_status = 'registered' ORDER BY seed IS NULL, seed, user_id`).all(tournamentId)
     const bracketSize = 2 ** Math.ceil(Math.log2(players.length))
     const roundNames = { 2: 'Final', 4: 'Semifinals', 8: 'Quarterfinals', 16: 'Round of 16', 32: 'Round of 32' }
@@ -356,9 +365,23 @@ app.post('/api/tournaments/:id/draw/generate', requireOrganizer, (req, res) => {
     recalculateTournamentPoints(tournamentId)
     const insert = db.prepare(`INSERT INTO matches (tournament_id, round_name, match_order, player_one_id, player_two_id)
       VALUES (?, ?, ?, ?, ?)`)
-    let matchOrder = 1
-    for (let left = 0; left + 1 < players.length; left += 2) insert.run(tournamentId, openingRound, matchOrder++, players[left].user_id, players[left + 1].user_id)
-    return { matchesCreated: matchOrder - 1, openingRound, bracketSize }
+    let pairs
+    if (players.length === bracketSize) {
+      const slots = Array(bracketSize).fill(null)
+      const seedPositions = [0, bracketSize / 2, bracketSize / 4, (bracketSize * 3) / 4]
+      const seededPlayers = players.filter((player) => player.seed && player.seed <= 4).sort((left, right) => left.seed - right.seed)
+      seededPlayers.forEach((player) => { slots[seedPositions[player.seed - 1]] = player })
+      const remainingPlayers = shuffle(players.filter((player) => !seededPlayers.some((seeded) => seeded.user_id === player.user_id)))
+      slots.forEach((slot, index) => { if (!slot) slots[index] = remainingPlayers.shift() })
+      pairs = Array.from({ length: bracketSize / 2 }, (_, index) => [slots[index * 2], slots[index * 2 + 1]])
+    } else {
+      const seededPlayers = players.filter((player) => player.seed && player.seed <= 4).sort((left, right) => left.seed - right.seed)
+      const remainingPlayers = shuffle(players.filter((player) => !seededPlayers.some((seeded) => seeded.user_id === player.user_id)))
+      pairs = []
+      while (seededPlayers.length || remainingPlayers.length) pairs.push([seededPlayers.shift() || remainingPlayers.shift(), remainingPlayers.shift() || seededPlayers.shift()])
+    }
+    pairs.filter(([one, two]) => one && two).forEach(([one, two], index) => insert.run(tournamentId, openingRound, index + 1, one.user_id, two.user_id))
+    return { matchesCreated: pairs.filter(([one, two]) => one && two).length, openingRound, bracketSize }
   })
   res.json(generate())
 })
