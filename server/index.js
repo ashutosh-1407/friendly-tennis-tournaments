@@ -360,9 +360,12 @@ app.get('/api/tournaments/:id', (req, res) => {
   const organizerPreview = isOrganizerAccount(req)
   const canViewDraw = publicDrawVisible || organizerPreview
   const matches = canViewDraw ? db.prepare(`SELECT m.*, p1.username AS player_one_name, p2.username AS player_two_name,
+      tp1.seed AS player_one_seed, tp2.seed AS player_two_seed,
       r.winner_user_id, winner.username AS winner_name, r.player_one_score, r.player_two_score
     FROM matches m
     JOIN users p1 ON p1.id = m.player_one_id JOIN users p2 ON p2.id = m.player_two_id
+    LEFT JOIN tournament_players tp1 ON tp1.tournament_id = m.tournament_id AND tp1.user_id = m.player_one_id
+    LEFT JOIN tournament_players tp2 ON tp2.tournament_id = m.tournament_id AND tp2.user_id = m.player_two_id
     LEFT JOIN match_results r ON r.match_id = m.id
     LEFT JOIN users winner ON winner.id = r.winner_user_id
     WHERE m.tournament_id = ? ORDER BY m.match_order`).all(tournamentId) : []
