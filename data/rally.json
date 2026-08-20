@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "savedAt": "2026-08-19T19:15:45.576Z",
+  "savedAt": "2026-08-20T01:01:03.475Z",
   "users": [
     {
       "id": 1,
@@ -480,7 +480,7 @@
       "registration_status": "registered",
       "seed": null,
       "points_earned": 0,
-      "registered_at": "2026-08-19 19:15:37"
+      "registered_at": "2026-08-20 00:54:28"
     }
   ],
   "matches": [
@@ -730,10 +730,10 @@
       "created_at": "2026-08-19 19:09:42"
     },
     {
-      "token": "21e3074f92badc9ef6a46307abab92a8eadbef9174d508e120bb1200d00ff993",
-      "user_id": 3,
-      "expires_at": "2026-09-18T19:15:45.575Z",
-      "created_at": "2026-08-19 19:15:45"
+      "token": "269835e9ef03e5f6235e245f2569823a5e0550f64635745c7cc1942b47b01b72",
+      "user_id": 1,
+      "expires_at": "2026-09-19T01:01:03.474Z",
+      "created_at": "2026-08-20 01:01:03"
     }
   ]
 }

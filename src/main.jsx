@@ -11,6 +11,14 @@ const TOURNAMENT_TIERS = {
   rally_500: { label: 'Rally 500 · Weekend Classic', points: 500, maxPlayers: 32, days: 2, scoring: 'Best of three' },
 }
 const USERS_PER_PAGE = 10
+const TOURNAMENT_NAME_PREFIXES = ['Sunday Rally', 'Baseline Bash', 'Court Side', 'Topspin', 'Ace', 'Match Point', 'Grand Slam', 'Golden Set', 'Net Rush', 'Racket Club']
+const TOURNAMENT_NAME_SUFFIXES = ['Open', 'Classic', 'Cup', 'Challenge', 'Showdown', 'Social', 'Series', 'Rally', 'Championship']
+
+function randomTournamentName() {
+  const prefix = TOURNAMENT_NAME_PREFIXES[Math.floor(Math.random() * TOURNAMENT_NAME_PREFIXES.length)]
+  const suffix = TOURNAMENT_NAME_SUFFIXES[Math.floor(Math.random() * TOURNAMENT_NAME_SUFFIXES.length)]
+  return `${prefix} ${suffix}`
+}
 
 function TennisBall() {
   return <span className="tennis-ball" aria-hidden="true"><i /><b /></span>
@@ -26,6 +34,13 @@ function registrationDeadlineLabel(tournament) {
   if (registrationHasClosed(tournament)) return 'Registration closed'
   const cutoff = tournament.registration_closes_at ? new Date(tournament.registration_closes_at) : new Date(new Date(tournament.starts_at).getTime() - 4 * 24 * 60 * 60 * 1000)
   return `Registration closes ${cutoff.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
+}
+
+function remainingCapacityLabel(tournament) {
+  const capacity = Number(tournament.max_players) || TOURNAMENT_TIERS[tournament.tournament_tier]?.maxPlayers || 0
+  const remaining = Math.max(0, capacity - Number(tournament.registered_count || 0))
+  if (!capacity) return null
+  return remaining === 0 ? 'Full' : `${remaining} ${remaining === 1 ? 'spot' : 'spots'} left`
 }
 
 function tournamentEndDate(startDate, tierKey) {
@@ -59,7 +74,7 @@ function TournamentDraw({ draw, isOrganizer, tournamentStatus, drawActionPending
         const match = roundMatches[matchIndex]
         const firstPlaceholder = roundIndex === 0 ? null : priorRoundMatches[matchIndex * 2]?.winner_name || `Winner of ${roundLabel(draw.rounds[roundIndex - 1])} ${matchIndex * 2 + 1}`
         const secondPlaceholder = roundIndex === 0 ? null : priorRoundMatches[matchIndex * 2 + 1]?.winner_name || `Winner of ${roundLabel(draw.rounds[roundIndex - 1])} ${matchIndex * 2 + 2}`
-        const canEnterScore = tournamentStatus === 'current' && match && (isOrganizer || [match.player_one_name, match.player_two_name].some((player) => player.toLowerCase() === username.toLowerCase()))
+        const canEnterScore = tournamentStatus === 'current' && match && (match.status !== 'completed' || isOrganizer) && (isOrganizer || [match.player_one_name, match.player_two_name].some((player) => player.toLowerCase() === username.toLowerCase()))
         const canShowWinner = ['current', 'past'].includes(tournamentStatus) && Boolean(match?.winner_user_id)
         return <div className={`bracket-match ${match ? '' : 'bracket-match--pending'} ${canEnterScore ? 'bracket-match--editable' : ''}`} key={match?.id || matchIndex} role={canEnterScore ? 'button' : undefined} tabIndex={canEnterScore ? 0 : undefined} onClick={() => canEnterScore && onEnterScore(match)} onKeyDown={(event) => canEnterScore && event.key === 'Enter' && onEnterScore(match)} title={canEnterScore ? 'Enter match score' : undefined}><div className={`bracket-player ${canShowWinner && match.winner_user_id === match.player_one_id ? 'bracket-player--winner' : ''}`}><span>{match ? match.player_one_name : firstPlaceholder}</span><b>{match?.player_one_score || '—'}</b></div><div className={`bracket-player ${canShowWinner && match.winner_user_id === match.player_two_id ? 'bracket-player--winner' : ''}`}><span>{match ? match.player_two_name : secondPlaceholder}</span><b>{match?.player_two_score || '—'}</b></div>{isOrganizer && tournamentStatus === 'current' && match && match.status !== 'completed' && <div className="bye-controls"><button onClick={(event) => { event.stopPropagation(); onAwardBye(match, match.player_one_id) }}>Bye → {match.player_one_name}</button><button onClick={(event) => { event.stopPropagation(); onAwardBye(match, match.player_two_id) }}>Bye → {match.player_two_name}</button></div>}</div>
       })}</div></section>
@@ -401,9 +416,10 @@ function App() {
   async function saveScore(sets) {
     if (!scoreMatch) return
     const isMatchPlayer = [scoreMatch.player_one_name, scoreMatch.player_two_name].some((player) => player.toLowerCase() === username.toLowerCase())
-    const passcode = isOrganizer && !isMatchPlayer ? requestOrganizerPasscode() : organizerPasscode
-    if (isOrganizer && !isMatchPlayer && !passcode) {
-      setScoreError('An organizer passcode is required to enter another player’s score.')
+    const isScoreOverride = scoreMatch.status === 'completed'
+    const passcode = isOrganizer && (isScoreOverride || !isMatchPlayer) ? requestOrganizerPasscode() : organizerPasscode
+    if (isOrganizer && (isScoreOverride || !isMatchPlayer) && !passcode) {
+      setScoreError(isScoreOverride ? 'An organizer passcode is required to change a submitted score.' : 'An organizer passcode is required to enter another player’s score.')
       return
     }
     setIsSavingScore(true)
@@ -452,6 +468,10 @@ function App() {
   function updateTournamentDraft(event) {
     const nextDraft = { ...tournamentDraft, [event.target.name]: event.target.value }
     setTournamentDraft(nextDraft)
+  }
+
+  function fillRandomTournamentName() {
+    setTournamentDraft((draft) => ({ ...draft, name: randomTournamentName() }))
   }
 
   async function createTournament(event) {
@@ -544,7 +564,7 @@ function App() {
           <button className="back-button" onClick={() => selectTab('tournaments')}>← Back to tournaments</button>
           <div className="create-heading"><p className="eyebrow">ORGANIZER TOOLS</p><h1 id="create-title">Create a tournament</h1><p>Set the basics now. Registration and match setup come next.</p></div>
           <form className="tournament-form" onSubmit={createTournament}>
-            <label>Tournament name<input name="name" value={tournamentDraft.name} onChange={updateTournamentDraft} placeholder="e.g. Sunday Rally Open" maxLength="100" required autoFocus /></label>
+            <label><span className="form-label-row">Tournament name<button type="button" className="random-name-button" onClick={fillRandomTournamentName}>↻ Random name</button></span><input name="name" value={tournamentDraft.name} onChange={updateTournamentDraft} placeholder="e.g. Sunday Rally Open" maxLength="100" required autoFocus /></label>
             <label>Tournament tier<select name="tournamentTier" value={tournamentDraft.tournamentTier} onChange={updateTournamentDraft}>{Object.entries(TOURNAMENT_TIERS).map(([key, tier]) => <option key={key} value={key}>{tier.label} — {tier.points} pts</option>)}</select><span className="tier-description">{TOURNAMENT_TIERS[tournamentDraft.tournamentTier].days} day · {TOURNAMENT_TIERS[tournamentDraft.tournamentTier].scoring} · Up to {TOURNAMENT_TIERS[tournamentDraft.tournamentTier].maxPlayers} players</span></label>
             <div className="form-grid"><label>Start date<input type="date" name="startDate" value={tournamentDraft.startDate} onChange={updateTournamentDraft} required /></label><label>End date <span className="optional">(set by tier)</span><input type="date" value={tournamentEndDate(tournamentDraft.startDate, tournamentDraft.tournamentTier)} readOnly /></label></div>
             <label>Location <span className="optional">(optional)</span><input name="location" value={tournamentDraft.location} onChange={updateTournamentDraft} placeholder="e.g. Riverside Tennis Center" maxLength="120" /></label>
@@ -570,7 +590,7 @@ function App() {
           {notice && <div className="notice" role="status">{notice}</div>}
           {registrationError && <div className="registration-error" role="alert">{registrationError}</div>}
           <div className="empty-state">
-            {isLoadingTournaments ? <p>Loading tournaments…</p> : tournaments.length ? <div className="tournament-list">{tournaments.map((tournament) => <article className="tournament-card" key={tournament.id} onClick={() => openTournament(tournament.id)}><div><p className="card-date">{new Date(tournament.starts_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}{tournament.starts_at.slice(0, 10) !== tournament.ends_at.slice(0, 10) && ` – ${new Date(tournament.ends_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`}</p><h2>{tournament.name}</h2><span className="tier-badge">{TOURNAMENT_TIERS[tournament.tournament_tier]?.label || 'Rally 500 · Weekend Classic'}</span>{tournament.location && <p>{tournament.location}</p>}{tournament.description && <p>{tournament.description}</p>}{registrationDeadlineLabel(tournament) && <p className={registrationHasClosed(tournament) ? 'registration-deadline registration-deadline--closed' : 'registration-deadline'}>{registrationDeadlineLabel(tournament)}</p>}</div><div className="card-action">{tournament.registration_status === 'registered' ? <div className="registration-actions"><span className="registered">Registered</span>{tournament.status !== 'past' && !registrationHasClosed(tournament) && <button className="deregister-action" disabled={registrationPending === tournament.id} onClick={(event) => { event.stopPropagation(); withdrawFromTournament(tournament) }}>{registrationPending === tournament.id ? 'Withdrawing…' : 'Withdraw'}</button>}</div> : tournament.status !== 'past' && (registrationHasClosed(tournament) ? <span className="registration-closed">Registration closed</span> : <button className="secondary-action" disabled={registrationPending === tournament.id} onClick={(event) => { event.stopPropagation(); registerForTournament(tournament) }}>{registrationPending === tournament.id ? 'Registering…' : 'Register'}</button>)}</div></article>)}</div> : <><div className="court-mark"><TennisBall /></div><h2>No {tournamentFilter} tournaments yet</h2><p>{tournamentFilter === 'upcoming' ? 'Check back soon for a friendly match near you.' : `When you have ${tournamentFilter} tournaments, they’ll appear here.`}</p>{tournamentFilter === 'upcoming' && isOrganizer && <button className="secondary-action" onClick={() => selectTab('create')}>Create the first tournament</button>}</>}
+            {isLoadingTournaments ? <p>Loading tournaments…</p> : tournaments.length ? <div className="tournament-list">{tournaments.map((tournament) => <article className="tournament-card" key={tournament.id} onClick={() => openTournament(tournament.id)}><div><p className="card-date">{new Date(tournament.starts_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}{tournament.starts_at.slice(0, 10) !== tournament.ends_at.slice(0, 10) && ` – ${new Date(tournament.ends_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`}</p><h2>{tournament.name}</h2><span className="tier-badge">{TOURNAMENT_TIERS[tournament.tournament_tier]?.label || 'Rally 500 · Weekend Classic'}</span>{tournament.status !== 'past' && <p className="capacity-note">{remainingCapacityLabel(tournament)}</p>}{tournament.location && <p>{tournament.location}</p>}{tournament.description && <p>{tournament.description}</p>}{registrationDeadlineLabel(tournament) && <p className={registrationHasClosed(tournament) ? 'registration-deadline registration-deadline--closed' : 'registration-deadline'}>{registrationDeadlineLabel(tournament)}</p>}</div><div className="card-action">{tournament.registration_status === 'registered' ? (tournament.status !== 'past' && !registrationHasClosed(tournament) ? <button className="secondary-action withdraw-action" disabled={registrationPending === tournament.id} onClick={(event) => { event.stopPropagation(); withdrawFromTournament(tournament) }}>{registrationPending === tournament.id ? 'Withdrawing…' : 'Withdraw'}</button> : <span className="registered">Registered</span>) : tournament.status !== 'past' && (registrationHasClosed(tournament) ? <span className="registration-closed">Registration closed</span> : <button className="secondary-action" disabled={registrationPending === tournament.id} onClick={(event) => { event.stopPropagation(); registerForTournament(tournament) }}>{registrationPending === tournament.id ? 'Registering…' : 'Register'}</button>)}</div></article>)}</div> : <><div className="court-mark"><TennisBall /></div><h2>No {tournamentFilter} tournaments yet</h2><p>{tournamentFilter === 'upcoming' ? 'Check back soon for a friendly match near you.' : `When you have ${tournamentFilter} tournaments, they’ll appear here.`}</p>{tournamentFilter === 'upcoming' && isOrganizer && <button className="secondary-action" onClick={() => selectTab('create')}>Create the first tournament</button>}</>}
           </div>
         </section>
       ) : (

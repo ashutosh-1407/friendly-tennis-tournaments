@@ -291,7 +291,7 @@ app.get('/api/tournaments', (req, res) => {
   const userId = req.authUser?.id || 0
   const organizerViewing = req.authUser?.username?.toLowerCase() === organizerUsername
   const validStatuses = ['upcoming', 'current', 'past']
-  let query = 'SELECT t.*, tp.registration_status, EXISTS(SELECT 1 FROM matches m WHERE m.tournament_id = t.id) AS draw_generated FROM tournaments t'
+  let query = "SELECT t.*, tp.registration_status, EXISTS(SELECT 1 FROM matches m WHERE m.tournament_id = t.id) AS draw_generated, (SELECT COUNT(*) FROM tournament_players registered WHERE registered.tournament_id = t.id AND registered.registration_status = 'registered') AS registered_count FROM tournaments t"
   const params = []
   if (Number.isInteger(userId) && userId > 0) { query += ' LEFT JOIN tournament_players tp ON tp.tournament_id = t.id AND tp.user_id = ?'; params.push(userId) }
   else query += ' LEFT JOIN tournament_players tp ON 1 = 0'
@@ -530,6 +530,8 @@ app.post('/api/matches/:id/result', requireUser, (req, res) => {
   if (tournament?.status !== 'current') return res.status(400).json({ error: 'Scores can only be entered for current tournaments.' })
   const user = req.authUser
   if (!user || (!isOrganizer(req) && user.id !== match.player_one_id && user.id !== match.player_two_id)) return res.status(403).json({ error: 'Only a player in this match or the organizer can enter its score.' })
+  const existingResult = db.prepare('SELECT 1 FROM match_results WHERE match_id = ?').get(match.id)
+  if (existingResult && !isOrganizer(req)) return res.status(409).json({ error: 'This score has already been submitted. Only the organizer can change it.' })
   const sets = Array.isArray(req.body?.sets) ? req.body.sets : []
   const isSingleSet = tournament.tournament_tier === 'rally_250'
   if (isSingleSet && (sets.length !== 1 || !validStandardSet(sets[0]))) return res.status(400).json({ error: 'Enter one valid tennis set score.' })
