@@ -21,10 +21,10 @@ function randomTournamentName() {
   return `${prefix} ${suffix}`
 }
 
-function weeklyDraftFromStartsAt(startsAt, requiredPlayers) {
+function weeklyDraftFromStartsAt(startsAt, requiredPlayers, courtName = '', courtNumbers = '') {
   const date = new Date(startsAt)
   const pad = (value) => String(value).padStart(2, '0')
-  return { date: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`, time: `${pad(date.getHours())}:${pad(date.getMinutes())}`, requiredPlayers: String(requiredPlayers) }
+  return { date: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`, time: `${pad(date.getHours())}:${pad(date.getMinutes())}`, requiredPlayers: String(requiredPlayers), courtName, courtNumbers }
 }
 
 function TennisBall() {
@@ -95,14 +95,14 @@ function WeeklyMatchesPage({ sessions, isLoading, actionPending, onRegister, onW
   return <section className="page weekly-page" aria-labelledby="weekly-matches-title">
     <div className="page-heading"><div><p className="eyebrow">CASUAL COURT TIME</p><h1 id="weekly-matches-title">Weekly matches</h1><p>Join a session, then get a random partner or opponent shortly before play.</p></div><button className="primary-action" onClick={onCreate}>+ Create weekly match</button></div>
     {notice && <div className="notice" role="status">{notice}</div>}{error && <div className="registration-error" role="alert">{error}</div>}
-    <div className="weekly-list">{isLoading ? <p>Loading weekly matches…</p> : sessions.length ? sessions.map((session) => { const startsAt = new Date(session.starts_at); const canRegister = registrationIsOpen(session); const pairedPlayerIds = new Set(session.pairings.flatMap((pairing) => [pairing.player_one_id, pairing.player_two_id])); const sittingOut = session.draw_generated_at ? session.registrations.filter((player) => !pairedPlayerIds.has(player.id)).map((player) => player.username) : []; return <article className="weekly-card" key={session.id}><div className="weekly-card-head"><div><p className="card-date">{startsAt.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })} · {startsAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</p><h2>Weekly court session</h2><p className="weekly-capacity">{session.registered_count} registered · first {session.required_players} play</p></div><div className="weekly-card-actions">{canRegister && <button className="edit-weekly-action" onClick={() => onEdit(session)}>Edit</button>}{session.registered ? (canRegister ? <button className="secondary-action withdraw-action" disabled={actionPending === `withdraw-${session.id}`} onClick={() => onWithdraw(session.id)}>{actionPending === `withdraw-${session.id}` ? 'Withdrawing…' : 'Withdraw'}</button> : <span className="registered">Registered</span>) : (canRegister ? <button className="secondary-action" disabled={actionPending === `register-${session.id}`} onClick={() => onRegister(session.id)}>{actionPending === `register-${session.id}` ? 'Registering…' : 'Register'}</button> : <span className="registration-closed">Registration closed one hour before play</span>)}</div></div>
+    <div className="weekly-list">{isLoading ? <p>Loading weekly matches…</p> : sessions.length ? sessions.map((session) => { const startsAt = new Date(session.starts_at); const canRegister = registrationIsOpen(session); const pairedPlayerIds = new Set(session.pairings.flatMap((pairing) => [pairing.player_one_id, pairing.player_two_id])); const sittingOut = session.draw_generated_at ? session.registrations.filter((player) => !pairedPlayerIds.has(player.id)).map((player) => player.username) : []; return <article className="weekly-card" key={session.id}><div className="weekly-card-head"><div><p className="card-date">{startsAt.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })} · {startsAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</p><h2>Weekly court session</h2>{(session.court_name || session.court_numbers) && <p className="weekly-court">{session.court_name}{session.court_name && session.court_numbers && ' · '}{session.court_numbers && `Courts ${session.court_numbers}`}</p>}<p className="weekly-capacity">{session.registered_count} registered · first {session.required_players} play</p></div><div className="weekly-card-actions">{canRegister && <button className="edit-weekly-action" onClick={() => onEdit(session)}>Edit</button>}{session.registered ? (canRegister ? <button className="secondary-action withdraw-action" disabled={actionPending === `withdraw-${session.id}`} onClick={() => onWithdraw(session.id)}>{actionPending === `withdraw-${session.id}` ? 'Withdrawing…' : 'Withdraw'}</button> : <span className="registered">Registered</span>) : (canRegister ? <button className="secondary-action" disabled={actionPending === `register-${session.id}`} onClick={() => onRegister(session.id)}>{actionPending === `register-${session.id}` ? 'Registering…' : 'Register'}</button> : <span className="registration-closed">Registration closed one hour before play</span>)}</div></div>
       {!session.draw_generated_at ? <div className="weekly-pairing-state">{generationIsOpen(session) ? <button className="primary-action" disabled={actionPending === `generate-${session.id}`} onClick={() => onGenerate(session.id)}>{actionPending === `generate-${session.id}` ? 'Generating…' : 'Generate random pairings'}</button> : <span>Pairings can be generated one hour before play.</span>}</div> : <div className="weekly-pairings"><strong>Random pairings</strong>{session.pairings.length ? <div>{session.pairings.map((pairing) => <p key={pairing.pairing_order}>Court {pairing.pairing_order}: <b>{pairing.player_one_name}</b> <span>vs</span> <b>{pairing.player_two_name}</b></p>)}</div> : <p>Not enough players for a pairing yet.</p>}{sittingOut.length > 0 && <small>No pairing for: {sittingOut.join(', ')}.</small>}</div>}</article> }) : <div className="empty-state"><div className="court-mark"><TennisBall /></div><h2>No weekly matches yet</h2><p>Create the first session for your group.</p></div>}</div>
   </section>
 }
 
 function WeeklyMatchCreatePage({ draft, onDraftChange, onCreate, isCreating, error, onBack, isEditing = false }) {
   const verb = isEditing ? 'Save changes' : 'Create weekly match'
-  return <section className="page create-page" aria-labelledby="weekly-create-title"><button className="back-button" onClick={onBack}>← Back to weekly matches</button><div className="create-heading"><p className="eyebrow">CASUAL COURT TIME</p><h1 id="weekly-create-title">{isEditing ? 'Edit weekly match' : 'Create a weekly match'}</h1><p>Set the date, time, and number of players needed.</p></div><form className="weekly-form" onSubmit={onCreate}><div className="form-grid"><label>Date<input type="date" name="date" value={draft.date} onChange={onDraftChange} required autoFocus /></label><label>Time<input type="time" name="time" value={draft.time} onChange={onDraftChange} required /></label><label>Players needed<input type="number" name="requiredPlayers" value={draft.requiredPlayers} onChange={onDraftChange} min="2" max="64" step="2" required /><span className="tier-description">Use an even number. Earliest registrations get the available spots.</span></label></div>{error && <p className="creation-error" role="alert">{error}</p>}<div className="form-actions"><button type="button" className="cancel-button" onClick={onBack}>Cancel</button><button type="submit" className="primary-action" disabled={isCreating}>{isCreating ? 'Saving…' : verb}</button></div></form></section>
+  return <section className="page create-page" aria-labelledby="weekly-create-title"><button className="back-button" onClick={onBack}>← Back to weekly matches</button><div className="create-heading"><p className="eyebrow">CASUAL COURT TIME</p><h1 id="weekly-create-title">{isEditing ? 'Edit weekly match' : 'Create a weekly match'}</h1><p>Set the date, time, courts, and number of players needed.</p></div><form className="weekly-form" onSubmit={onCreate}><div className="form-grid"><label>Date<input type="date" name="date" value={draft.date} onChange={onDraftChange} required autoFocus /></label><label>Time<input type="time" name="time" value={draft.time} onChange={onDraftChange} required /></label><label>Tennis court name<input name="courtName" value={draft.courtName} onChange={onDraftChange} placeholder="e.g. Riverside Tennis Center" maxLength="120" required /></label><label>Court numbers<input name="courtNumbers" value={draft.courtNumbers} onChange={onDraftChange} placeholder="e.g. 1, 2, 3" maxLength="80" required /></label><label>Players needed<input type="number" name="requiredPlayers" value={draft.requiredPlayers} onChange={onDraftChange} min="2" max="64" step="2" required /><span className="tier-description">Use an even number. Earliest registrations get the available spots.</span></label></div>{error && <p className="creation-error" role="alert">{error}</p>}<div className="form-actions"><button type="button" className="cancel-button" onClick={onBack}>Cancel</button><button type="submit" className="primary-action" disabled={isCreating}>{isCreating ? 'Saving…' : verb}</button></div></form></section>
 }
 
 function ScoreEntryModal({ match, onClose, onSave, isSaving, error, isSingleSet }) {
@@ -135,7 +135,7 @@ function App() {
   const [isLoadingTournaments, setIsLoadingTournaments] = React.useState(false)
   const [registrationError, setRegistrationError] = React.useState('')
   const [registrationPending, setRegistrationPending] = React.useState(null)
-  const [weeklyDraft, setWeeklyDraft] = React.useState({ date: '', time: '', requiredPlayers: '8' })
+  const [weeklyDraft, setWeeklyDraft] = React.useState({ date: '', time: '', requiredPlayers: '8', courtName: '', courtNumbers: '' })
   const [weeklySessions, setWeeklySessions] = React.useState([])
   const [isLoadingWeekly, setIsLoadingWeekly] = React.useState(false)
   const [isCreatingWeekly, setIsCreatingWeekly] = React.useState(false)
@@ -349,10 +349,10 @@ function App() {
     setWeeklyError('')
     setIsCreatingWeekly(true)
     try {
-      const response = await fetch('/api/weekly-matches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ startsAt: `${weeklyDraft.date}T${weeklyDraft.time}`, requiredPlayers: Number(weeklyDraft.requiredPlayers) }) })
+      const response = await fetch('/api/weekly-matches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ startsAt: `${weeklyDraft.date}T${weeklyDraft.time}`, requiredPlayers: Number(weeklyDraft.requiredPlayers), courtName: weeklyDraft.courtName, courtNumbers: weeklyDraft.courtNumbers }) })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Unable to create weekly match.')
-      setWeeklyDraft({ date: '', time: '', requiredPlayers: '8' })
+      setWeeklyDraft({ date: '', time: '', requiredPlayers: '8', courtName: '', courtNumbers: '' })
       setWeeklyVersion((version) => version + 1)
       setNotice('Weekly match created.')
       setActiveTab('weekly')
@@ -366,7 +366,7 @@ function App() {
   function openWeeklyMatchEdit(session) {
     setWeeklyError('')
     setEditingWeeklyMatchId(session.id)
-    setWeeklyDraft(weeklyDraftFromStartsAt(session.starts_at, session.required_players))
+    setWeeklyDraft(weeklyDraftFromStartsAt(session.starts_at, session.required_players, session.court_name || '', session.court_numbers || ''))
     setActiveTab('weekly-edit')
   }
 
@@ -376,7 +376,7 @@ function App() {
     setWeeklyError('')
     setIsCreatingWeekly(true)
     try {
-      const response = await fetch(`/api/weekly-matches/${editingWeeklyMatchId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ startsAt: `${weeklyDraft.date}T${weeklyDraft.time}`, requiredPlayers: Number(weeklyDraft.requiredPlayers) }) })
+      const response = await fetch(`/api/weekly-matches/${editingWeeklyMatchId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ startsAt: `${weeklyDraft.date}T${weeklyDraft.time}`, requiredPlayers: Number(weeklyDraft.requiredPlayers), courtName: weeklyDraft.courtName, courtNumbers: weeklyDraft.courtNumbers }) })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Unable to update weekly match.')
       setEditingWeeklyMatchId(null)

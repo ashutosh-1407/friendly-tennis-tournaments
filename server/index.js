@@ -38,6 +38,12 @@ if (!db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name = 'password
 if (!db.prepare("SELECT 1 FROM pragma_table_info('tournaments') WHERE name = 'tournament_tier'").get()) {
   db.exec("ALTER TABLE tournaments ADD COLUMN tournament_tier TEXT NOT NULL DEFAULT 'rally_500' CHECK (tournament_tier IN ('rally_250', 'rally_500'))")
 }
+if (!db.prepare("SELECT 1 FROM pragma_table_info('weekly_match_sessions') WHERE name = 'court_name'").get()) {
+  db.exec('ALTER TABLE weekly_match_sessions ADD COLUMN court_name TEXT')
+}
+if (!db.prepare("SELECT 1 FROM pragma_table_info('weekly_match_sessions') WHERE name = 'court_numbers'").get()) {
+  db.exec('ALTER TABLE weekly_match_sessions ADD COLUMN court_numbers TEXT')
+}
 
 const snapshotPath = path.join(dataDirectory, 'rally.json')
 const bundledSnapshotPath = path.join(bundledDataDirectory, 'rally.json')
@@ -252,10 +258,13 @@ app.get('/api/weekly-matches', requireUser, (req, res) => {
 app.post('/api/weekly-matches', requireUser, (req, res) => {
   const startsAt = new Date(String(req.body?.startsAt || ''))
   const requiredPlayers = Number(req.body?.requiredPlayers)
+  const courtName = String(req.body?.courtName || '').trim().slice(0, 120)
+  const courtNumbers = String(req.body?.courtNumbers || '').trim().slice(0, 80)
   if (Number.isNaN(startsAt.getTime()) || startsAt <= new Date()) return res.status(400).json({ error: 'Choose a future date and time.' })
   if (!Number.isInteger(requiredPlayers) || requiredPlayers < 2 || requiredPlayers > 64 || requiredPlayers % 2 !== 0) return res.status(400).json({ error: 'Choose an even number of players between 2 and 64.' })
-  const session = db.prepare(`INSERT INTO weekly_match_sessions (starts_at, required_players, created_by_user_id)
-    VALUES (?, ?, ?) RETURNING *`).get(startsAt.toISOString(), requiredPlayers, req.authUser.id)
+  if (!courtName || !courtNumbers) return res.status(400).json({ error: 'Enter the tennis court name and court numbers.' })
+  const session = db.prepare(`INSERT INTO weekly_match_sessions (starts_at, required_players, court_name, court_numbers, created_by_user_id)
+    VALUES (?, ?, ?, ?, ?) RETURNING *`).get(startsAt.toISOString(), requiredPlayers, courtName || null, courtNumbers || null, req.authUser.id)
   res.status(201).json({ session })
 })
 
@@ -266,10 +275,13 @@ app.patch('/api/weekly-matches/:id', requireUser, (req, res) => {
   if (new Date() >= new Date(session.starts_at)) return res.status(400).json({ error: 'A weekly match cannot be changed after it starts.' })
   const startsAt = new Date(String(req.body?.startsAt || ''))
   const requiredPlayers = Number(req.body?.requiredPlayers)
+  const courtName = String(req.body?.courtName || '').trim().slice(0, 120)
+  const courtNumbers = String(req.body?.courtNumbers || '').trim().slice(0, 80)
   if (Number.isNaN(startsAt.getTime()) || startsAt <= new Date()) return res.status(400).json({ error: 'Choose a future date and time.' })
   if (!Number.isInteger(requiredPlayers) || requiredPlayers < 2 || requiredPlayers > 64 || requiredPlayers % 2 !== 0) return res.status(400).json({ error: 'Choose an even number of players between 2 and 64.' })
+  if (!courtName || !courtNumbers) return res.status(400).json({ error: 'Enter the tennis court name and court numbers.' })
   db.transaction(() => {
-    db.prepare('UPDATE weekly_match_sessions SET starts_at = ?, required_players = ?, draw_generated_at = NULL WHERE id = ?').run(startsAt.toISOString(), requiredPlayers, sessionId)
+    db.prepare('UPDATE weekly_match_sessions SET starts_at = ?, required_players = ?, court_name = ?, court_numbers = ?, draw_generated_at = NULL WHERE id = ?').run(startsAt.toISOString(), requiredPlayers, courtName || null, courtNumbers || null, sessionId)
     db.prepare('DELETE FROM weekly_match_pairings WHERE session_id = ?').run(sessionId)
   })()
   res.json({ updated: true })

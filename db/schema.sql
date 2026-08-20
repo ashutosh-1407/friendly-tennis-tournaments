@@ -73,6 +73,8 @@ CREATE TABLE IF NOT EXISTS weekly_match_sessions (
   id INTEGER PRIMARY KEY,
   starts_at TEXT NOT NULL,
   required_players INTEGER NOT NULL CHECK (required_players >= 2 AND required_players <= 64 AND required_players % 2 = 0),
+  court_name TEXT,
+  court_numbers TEXT,
   created_by_user_id INTEGER NOT NULL REFERENCES users(id),
   draw_generated_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
