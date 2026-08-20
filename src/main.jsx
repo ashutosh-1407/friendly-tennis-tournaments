@@ -5,6 +5,7 @@ import './styles.css'
 const USERNAME_KEY = 'rally.username'
 const USER_ID_KEY = 'rally.userId'
 const ORGANIZER_PASSCODE_KEY = 'rally.organizerPasscode'
+const ACTIVE_TAB_KEY = 'rally.activeTab'
 const ORGANIZER_USERNAME = 'ashutosh.1407'
 const TOURNAMENT_TIERS = {
   rally_250: { label: 'Rally 250 · Court Sprint', points: 250, maxPlayers: 16, days: 1, scoring: 'One set' },
@@ -18,6 +19,12 @@ function randomTournamentName() {
   const prefix = TOURNAMENT_NAME_PREFIXES[Math.floor(Math.random() * TOURNAMENT_NAME_PREFIXES.length)]
   const suffix = TOURNAMENT_NAME_SUFFIXES[Math.floor(Math.random() * TOURNAMENT_NAME_SUFFIXES.length)]
   return `${prefix} ${suffix}`
+}
+
+function weeklyDraftFromStartsAt(startsAt, requiredPlayers) {
+  const date = new Date(startsAt)
+  const pad = (value) => String(value).padStart(2, '0')
+  return { date: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`, time: `${pad(date.getHours())}:${pad(date.getMinutes())}`, requiredPlayers: String(requiredPlayers) }
 }
 
 function TennisBall() {
@@ -82,6 +89,22 @@ function TournamentDraw({ draw, isOrganizer, tournamentStatus, drawActionPending
   </div>
 }
 
+function WeeklyMatchesPage({ sessions, isLoading, actionPending, onRegister, onWithdraw, onGenerate, error, notice, onCreate, onEdit }) {
+  const generationIsOpen = (session) => Date.now() >= new Date(session.starts_at).getTime() - 60 * 60 * 1000
+  const registrationIsOpen = (session) => Date.now() < new Date(session.starts_at).getTime() - 60 * 60 * 1000
+  return <section className="page weekly-page" aria-labelledby="weekly-matches-title">
+    <div className="page-heading"><div><p className="eyebrow">CASUAL COURT TIME</p><h1 id="weekly-matches-title">Weekly matches</h1><p>Join a session, then get a random partner or opponent shortly before play.</p></div><button className="primary-action" onClick={onCreate}>+ Create weekly match</button></div>
+    {notice && <div className="notice" role="status">{notice}</div>}{error && <div className="registration-error" role="alert">{error}</div>}
+    <div className="weekly-list">{isLoading ? <p>Loading weekly matches…</p> : sessions.length ? sessions.map((session) => { const startsAt = new Date(session.starts_at); const canRegister = registrationIsOpen(session); const pairedPlayerIds = new Set(session.pairings.flatMap((pairing) => [pairing.player_one_id, pairing.player_two_id])); const sittingOut = session.draw_generated_at ? session.registrations.filter((player) => !pairedPlayerIds.has(player.id)).map((player) => player.username) : []; return <article className="weekly-card" key={session.id}><div className="weekly-card-head"><div><p className="card-date">{startsAt.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })} · {startsAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</p><h2>Weekly court session</h2><p className="weekly-capacity">{session.registered_count} registered · first {session.required_players} play</p></div><div className="weekly-card-actions">{canRegister && <button className="edit-weekly-action" onClick={() => onEdit(session)}>Edit</button>}{session.registered ? (canRegister ? <button className="secondary-action withdraw-action" disabled={actionPending === `withdraw-${session.id}`} onClick={() => onWithdraw(session.id)}>{actionPending === `withdraw-${session.id}` ? 'Withdrawing…' : 'Withdraw'}</button> : <span className="registered">Registered</span>) : (canRegister ? <button className="secondary-action" disabled={actionPending === `register-${session.id}`} onClick={() => onRegister(session.id)}>{actionPending === `register-${session.id}` ? 'Registering…' : 'Register'}</button> : <span className="registration-closed">Registration closed one hour before play</span>)}</div></div>
+      {!session.draw_generated_at ? <div className="weekly-pairing-state">{generationIsOpen(session) ? <button className="primary-action" disabled={actionPending === `generate-${session.id}`} onClick={() => onGenerate(session.id)}>{actionPending === `generate-${session.id}` ? 'Generating…' : 'Generate random pairings'}</button> : <span>Pairings can be generated one hour before play.</span>}</div> : <div className="weekly-pairings"><strong>Random pairings</strong>{session.pairings.length ? <div>{session.pairings.map((pairing) => <p key={pairing.pairing_order}>Court {pairing.pairing_order}: <b>{pairing.player_one_name}</b> <span>vs</span> <b>{pairing.player_two_name}</b></p>)}</div> : <p>Not enough players for a pairing yet.</p>}{sittingOut.length > 0 && <small>No pairing for: {sittingOut.join(', ')}.</small>}</div>}</article> }) : <div className="empty-state"><div className="court-mark"><TennisBall /></div><h2>No weekly matches yet</h2><p>Create the first session for your group.</p></div>}</div>
+  </section>
+}
+
+function WeeklyMatchCreatePage({ draft, onDraftChange, onCreate, isCreating, error, onBack, isEditing = false }) {
+  const verb = isEditing ? 'Save changes' : 'Create weekly match'
+  return <section className="page create-page" aria-labelledby="weekly-create-title"><button className="back-button" onClick={onBack}>← Back to weekly matches</button><div className="create-heading"><p className="eyebrow">CASUAL COURT TIME</p><h1 id="weekly-create-title">{isEditing ? 'Edit weekly match' : 'Create a weekly match'}</h1><p>Set the date, time, and number of players needed.</p></div><form className="weekly-form" onSubmit={onCreate}><div className="form-grid"><label>Date<input type="date" name="date" value={draft.date} onChange={onDraftChange} required autoFocus /></label><label>Time<input type="time" name="time" value={draft.time} onChange={onDraftChange} required /></label><label>Players needed<input type="number" name="requiredPlayers" value={draft.requiredPlayers} onChange={onDraftChange} min="2" max="64" step="2" required /><span className="tier-description">Use an even number. Earliest registrations get the available spots.</span></label></div>{error && <p className="creation-error" role="alert">{error}</p>}<div className="form-actions"><button type="button" className="cancel-button" onClick={onBack}>Cancel</button><button type="submit" className="primary-action" disabled={isCreating}>{isCreating ? 'Saving…' : verb}</button></div></form></section>
+}
+
 function ScoreEntryModal({ match, onClose, onSave, isSaving, error, isSingleSet }) {
   const blankSet = { playerOneGames: '', playerTwoGames: '', tiebreakPlayerOne: '', tiebreakPlayerTwo: '' }
   const [sets, setSets] = React.useState(() => isSingleSet ? [blankSet] : [blankSet, blankSet, { playerOnePoints: '', playerTwoPoints: '' }])
@@ -98,7 +121,7 @@ function App() {
   const [isCheckingSession, setIsCheckingSession] = React.useState(true)
   const [draftPassword, setDraftPassword] = React.useState('')
   const [authMode, setAuthMode] = React.useState('signin')
-  const [activeTab, setActiveTab] = React.useState('tournaments')
+  const [activeTab, setActiveTab] = React.useState(() => ['weekly', 'tournaments', 'leaderboard'].includes(localStorage.getItem(ACTIVE_TAB_KEY)) ? localStorage.getItem(ACTIVE_TAB_KEY) : 'tournaments')
   const [tournamentFilter, setTournamentFilter] = React.useState('upcoming')
   const [notice, setNotice] = React.useState('')
   const [isSavingUsername, setIsSavingUsername] = React.useState(false)
@@ -112,6 +135,14 @@ function App() {
   const [isLoadingTournaments, setIsLoadingTournaments] = React.useState(false)
   const [registrationError, setRegistrationError] = React.useState('')
   const [registrationPending, setRegistrationPending] = React.useState(null)
+  const [weeklyDraft, setWeeklyDraft] = React.useState({ date: '', time: '', requiredPlayers: '8' })
+  const [weeklySessions, setWeeklySessions] = React.useState([])
+  const [isLoadingWeekly, setIsLoadingWeekly] = React.useState(false)
+  const [isCreatingWeekly, setIsCreatingWeekly] = React.useState(false)
+  const [weeklyActionPending, setWeeklyActionPending] = React.useState('')
+  const [weeklyError, setWeeklyError] = React.useState('')
+  const [weeklyVersion, setWeeklyVersion] = React.useState(0)
+  const [editingWeeklyMatchId, setEditingWeeklyMatchId] = React.useState(null)
   const [selectedTournamentId, setSelectedTournamentId] = React.useState(null)
   const [tournamentDetail, setTournamentDetail] = React.useState(null)
   const [detailTab, setDetailTab] = React.useState('players')
@@ -149,6 +180,10 @@ function App() {
       })
       .finally(() => setIsCheckingSession(false))
   }, [])
+
+  React.useEffect(() => {
+    if (['weekly', 'tournaments', 'leaderboard'].includes(activeTab)) localStorage.setItem(ACTIVE_TAB_KEY, activeTab)
+  }, [activeTab])
 
   async function continueAsUser(event) {
     event.preventDefault()
@@ -236,6 +271,20 @@ function App() {
   }, [activeTab, tournamentFilter, userId, notice])
 
   React.useEffect(() => {
+    if (activeTab !== 'weekly' || !username) return
+    setIsLoadingWeekly(true)
+    fetch('/api/weekly-matches')
+      .then(async (response) => {
+        const data = await response.json()
+        if (!response.ok) throw new Error(data.error || 'Unable to load weekly matches.')
+        return data
+      })
+      .then((data) => setWeeklySessions(data.sessions || []))
+      .catch((error) => setWeeklyError(error.message))
+      .finally(() => setIsLoadingWeekly(false))
+  }, [activeTab, username, weeklyVersion])
+
+  React.useEffect(() => {
     if (activeTab !== 'leaderboard') return
     fetch('/api/leaderboard')
       .then((response) => response.ok ? response.json() : Promise.reject())
@@ -288,6 +337,87 @@ function App() {
       setRegistrationError(error.message)
     } finally {
       setRegistrationPending(null)
+    }
+  }
+
+  function updateWeeklyDraft(event) {
+    setWeeklyDraft((draft) => ({ ...draft, [event.target.name]: event.target.value }))
+  }
+
+  async function createWeeklyMatch(event) {
+    event.preventDefault()
+    setWeeklyError('')
+    setIsCreatingWeekly(true)
+    try {
+      const response = await fetch('/api/weekly-matches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ startsAt: `${weeklyDraft.date}T${weeklyDraft.time}`, requiredPlayers: Number(weeklyDraft.requiredPlayers) }) })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Unable to create weekly match.')
+      setWeeklyDraft({ date: '', time: '', requiredPlayers: '8' })
+      setWeeklyVersion((version) => version + 1)
+      setNotice('Weekly match created.')
+      setActiveTab('weekly')
+    } catch (error) {
+      setWeeklyError(error.message)
+    } finally {
+      setIsCreatingWeekly(false)
+    }
+  }
+
+  function openWeeklyMatchEdit(session) {
+    setWeeklyError('')
+    setEditingWeeklyMatchId(session.id)
+    setWeeklyDraft(weeklyDraftFromStartsAt(session.starts_at, session.required_players))
+    setActiveTab('weekly-edit')
+  }
+
+  async function saveWeeklyMatch(event) {
+    event.preventDefault()
+    if (!editingWeeklyMatchId) return
+    setWeeklyError('')
+    setIsCreatingWeekly(true)
+    try {
+      const response = await fetch(`/api/weekly-matches/${editingWeeklyMatchId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ startsAt: `${weeklyDraft.date}T${weeklyDraft.time}`, requiredPlayers: Number(weeklyDraft.requiredPlayers) }) })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Unable to update weekly match.')
+      setEditingWeeklyMatchId(null)
+      setWeeklyVersion((version) => version + 1)
+      setNotice('Weekly match updated.')
+      setActiveTab('weekly')
+    } catch (error) {
+      setWeeklyError(error.message)
+    } finally {
+      setIsCreatingWeekly(false)
+    }
+  }
+
+  async function updateWeeklyRegistration(sessionId, method) {
+    const action = method === 'POST' ? 'register' : 'withdraw'
+    setWeeklyError('')
+    setWeeklyActionPending(`${action}-${sessionId}`)
+    try {
+      const response = await fetch(`/api/weekly-matches/${sessionId}/registrations`, { method })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || `Unable to ${action}.`)
+      setWeeklyVersion((version) => version + 1)
+    } catch (error) {
+      setWeeklyError(error.message)
+    } finally {
+      setWeeklyActionPending('')
+    }
+  }
+
+  async function generateWeeklyPairings(sessionId) {
+    setWeeklyError('')
+    setWeeklyActionPending(`generate-${sessionId}`)
+    try {
+      const response = await fetch(`/api/weekly-matches/${sessionId}/draw/generate`, { method: 'POST' })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Unable to generate pairings.')
+      setWeeklyVersion((version) => version + 1)
+    } catch (error) {
+      setWeeklyError(error.message)
+    } finally {
+      setWeeklyActionPending('')
     }
   }
 
@@ -546,6 +676,7 @@ function App() {
       <header className="topbar">
         <div className="brand"><TennisBall /><span>rally</span></div>
         <nav aria-label="Main navigation">
+          <button className={['weekly', 'weekly-create', 'weekly-edit'].includes(activeTab) ? 'active' : ''} onClick={() => selectTab('weekly')}>Weekly Matches</button>
           <button className={activeTab === 'tournaments' ? 'active' : ''} onClick={() => selectTab('tournaments')}>Tournaments</button>
           <button className={activeTab === 'leaderboard' ? 'active' : ''} onClick={() => selectTab('leaderboard')}>Leaderboard</button>
           {isOrganizer && <button className={activeTab === 'users' ? 'active' : ''} onClick={() => selectTab('users')}>Users</button>}
@@ -553,7 +684,7 @@ function App() {
         <button className="profile" onClick={changeUser} title="Use a different username"><span className="avatar">{username.slice(0, 1).toUpperCase()}</span><span>@{username}</span><span className="switch">Switch</span></button>
       </header>
 
-      {activeTab === 'detail' ? (
+      {activeTab === 'weekly' ? <WeeklyMatchesPage sessions={weeklySessions} isLoading={isLoadingWeekly} actionPending={weeklyActionPending} onRegister={(sessionId) => updateWeeklyRegistration(sessionId, 'POST')} onWithdraw={(sessionId) => updateWeeklyRegistration(sessionId, 'DELETE')} onGenerate={generateWeeklyPairings} error={weeklyError} notice={notice} onCreate={() => { setWeeklyError(''); setActiveTab('weekly-create') }} onEdit={openWeeklyMatchEdit} /> : activeTab === 'weekly-create' ? <WeeklyMatchCreatePage draft={weeklyDraft} onDraftChange={updateWeeklyDraft} onCreate={createWeeklyMatch} isCreating={isCreatingWeekly} error={weeklyError} onBack={() => selectTab('weekly')} /> : activeTab === 'weekly-edit' ? <WeeklyMatchCreatePage draft={weeklyDraft} onDraftChange={updateWeeklyDraft} onCreate={saveWeeklyMatch} isCreating={isCreatingWeekly} error={weeklyError} onBack={() => selectTab('weekly')} isEditing /> : activeTab === 'detail' ? (
         <section className="page detail-page" aria-labelledby="tournament-detail-title">
           <button className="back-button" onClick={() => selectTab('tournaments')}>← Back to tournaments</button>
           {detailError && <p className="creation-error" role="alert">{detailError}</p>}
