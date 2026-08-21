@@ -287,6 +287,13 @@ app.patch('/api/weekly-matches/:id', requireUser, (req, res) => {
   res.json({ updated: true })
 })
 
+app.delete('/api/weekly-matches/:id', requireOrganizer, (req, res) => {
+  const sessionId = Number(req.params.id)
+  const result = db.prepare('DELETE FROM weekly_match_sessions WHERE id = ?').run(sessionId)
+  if (!result.changes) return res.status(404).json({ error: 'Weekly match not found.' })
+  res.json({ deleted: true })
+})
+
 app.post('/api/weekly-matches/:id/registrations', requireUser, (req, res) => {
   const sessionId = Number(req.params.id)
   const session = db.prepare('SELECT * FROM weekly_match_sessions WHERE id = ?').get(sessionId)

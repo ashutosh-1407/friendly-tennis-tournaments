@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "savedAt": "2026-08-20T22:51:02.494Z",
+  "savedAt": "2026-08-21T02:32:00.136Z",
   "users": [
     {
       "id": 1,
@@ -745,16 +745,6 @@
       "created_at": "2026-08-20 19:29:11",
       "court_name": "Memorial Park Tennis Center",
       "court_numbers": "1, 2, 3, 4"
-    },
-    {
-      "id": 2,
-      "starts_at": "2026-08-21T22:50:00.000Z",
-      "required_players": 8,
-      "created_by_user_id": 1,
-      "draw_generated_at": null,
-      "created_at": "2026-08-20 22:51:02",
-      "court_name": "Riverside",
-      "court_numbers": "3,5"
     }
   ],
   "weekly_match_registrations": [
@@ -843,10 +833,10 @@
       "created_at": "2026-08-20 19:47:03"
     },
     {
-      "token": "a6da54045483593bcf6ef84a26e689cba8b9a7535e4f78c705a780a366659fa8",
+      "token": "d110fe0e0a5b1ece86b97d1eb93b5f1fe913b65886d71bc2a0ef58d8dc8aebe6",
       "user_id": 1,
-      "expires_at": "2026-09-19T22:50:01.538Z",
-      "created_at": "2026-08-20 22:50:01"
+      "expires_at": "2026-09-20T02:31:51.895Z",
+      "created_at": "2026-08-21 02:31:51"
     }
   ]
 }
