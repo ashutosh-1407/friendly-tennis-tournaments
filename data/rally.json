@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "savedAt": "2026-08-20T01:04:44.208Z",
+  "savedAt": "2026-08-21T02:32:00.136Z",
   "users": [
     {
       "id": 1,
@@ -735,6 +735,78 @@
       "reported_at": "2026-08-19 18:04:31"
     }
   ],
+  "weekly_match_sessions": [
+    {
+      "id": 1,
+      "starts_at": "2026-08-20T20:30:00.000Z",
+      "required_players": 8,
+      "created_by_user_id": 1,
+      "draw_generated_at": "2026-08-20T19:45:51.140Z",
+      "created_at": "2026-08-20 19:29:11",
+      "court_name": "Memorial Park Tennis Center",
+      "court_numbers": "1, 2, 3, 4"
+    }
+  ],
+  "weekly_match_registrations": [
+    {
+      "session_id": 1,
+      "user_id": 3,
+      "registered_at": "2026-08-20 19:36:14"
+    },
+    {
+      "session_id": 1,
+      "user_id": 5,
+      "registered_at": "2026-08-20 19:38:28"
+    },
+    {
+      "session_id": 1,
+      "user_id": 10,
+      "registered_at": "2026-08-20 19:38:28"
+    },
+    {
+      "session_id": 1,
+      "user_id": 8,
+      "registered_at": "2026-08-20 19:38:28"
+    },
+    {
+      "session_id": 1,
+      "user_id": 7,
+      "registered_at": "2026-08-20 19:38:28"
+    },
+    {
+      "session_id": 1,
+      "user_id": 6,
+      "registered_at": "2026-08-20 19:38:28"
+    },
+    {
+      "session_id": 1,
+      "user_id": 1,
+      "registered_at": "2026-08-20 19:45:48"
+    }
+  ],
+  "weekly_match_pairings": [
+    {
+      "id": 1,
+      "session_id": 1,
+      "pairing_order": 1,
+      "player_one_id": 6,
+      "player_two_id": 3
+    },
+    {
+      "id": 2,
+      "session_id": 1,
+      "pairing_order": 2,
+      "player_one_id": 10,
+      "player_two_id": 5
+    },
+    {
+      "id": 3,
+      "session_id": 1,
+      "pairing_order": 3,
+      "player_one_id": 8,
+      "player_two_id": 7
+    }
+  ],
   "sessions": [
     {
       "token": "81be7b952ad88e46a74e0ba5fd7ff5769a1f9a8dce2c6ea5a1351d95efe23e93",
@@ -749,10 +821,22 @@
       "created_at": "2026-08-19 19:09:42"
     },
     {
-      "token": "269835e9ef03e5f6235e245f2569823a5e0550f64635745c7cc1942b47b01b72",
+      "token": "1b3d31ca3a3c683c3544bc31684fb81fcc062fb6653b888670258508d78e47b6",
       "user_id": 1,
-      "expires_at": "2026-09-19T01:01:03.474Z",
-      "created_at": "2026-08-20 01:01:03"
+      "expires_at": "2026-09-19T19:41:34.727Z",
+      "created_at": "2026-08-20 19:41:34"
+    },
+    {
+      "token": "7b82690844410835f01923a553520733e58b39892d576214dab290dd271939bb",
+      "user_id": 1,
+      "expires_at": "2026-09-19T19:47:03.061Z",
+      "created_at": "2026-08-20 19:47:03"
+    },
+    {
+      "token": "d110fe0e0a5b1ece86b97d1eb93b5f1fe913b65886d71bc2a0ef58d8dc8aebe6",
+      "user_id": 1,
+      "expires_at": "2026-09-20T02:31:51.895Z",
+      "created_at": "2026-08-21 02:31:51"
     }
   ]
 }

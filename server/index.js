@@ -38,10 +38,16 @@ if (!db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name = 'password
 if (!db.prepare("SELECT 1 FROM pragma_table_info('tournaments') WHERE name = 'tournament_tier'").get()) {
   db.exec("ALTER TABLE tournaments ADD COLUMN tournament_tier TEXT NOT NULL DEFAULT 'rally_500' CHECK (tournament_tier IN ('rally_250', 'rally_500'))")
 }
+if (!db.prepare("SELECT 1 FROM pragma_table_info('weekly_match_sessions') WHERE name = 'court_name'").get()) {
+  db.exec('ALTER TABLE weekly_match_sessions ADD COLUMN court_name TEXT')
+}
+if (!db.prepare("SELECT 1 FROM pragma_table_info('weekly_match_sessions') WHERE name = 'court_numbers'").get()) {
+  db.exec('ALTER TABLE weekly_match_sessions ADD COLUMN court_numbers TEXT')
+}
 
 const snapshotPath = path.join(dataDirectory, 'rally.json')
 const bundledSnapshotPath = path.join(bundledDataDirectory, 'rally.json')
-const snapshotTables = ['users', 'tournaments', 'tournament_players', 'matches', 'match_results', 'sessions']
+const snapshotTables = ['users', 'tournaments', 'tournament_players', 'matches', 'match_results', 'weekly_match_sessions', 'weekly_match_registrations', 'weekly_match_pairings', 'sessions']
 
 // A new Railway Volume starts empty. Seed it once from the deployed snapshot,
 // then all later changes are saved only on the persistent Volume.
@@ -86,7 +92,7 @@ function restoreDatabase() {
   if (!fs.existsSync(snapshotPath)) return false
   const snapshot = JSON.parse(fs.readFileSync(snapshotPath, 'utf8'))
   const restore = db.transaction(() => {
-    db.exec('DELETE FROM sessions; DELETE FROM match_results; DELETE FROM matches; DELETE FROM tournament_players; DELETE FROM tournaments; DELETE FROM users;')
+    db.exec('DELETE FROM sessions; DELETE FROM match_results; DELETE FROM matches; DELETE FROM tournament_players; DELETE FROM weekly_match_pairings; DELETE FROM weekly_match_registrations; DELETE FROM weekly_match_sessions; DELETE FROM tournaments; DELETE FROM users;')
     for (const table of snapshotTables) {
       const rows = Array.isArray(snapshot[table]) ? snapshot[table] : []
       if (!rows.length) continue
@@ -232,6 +238,111 @@ app.get('/api/users', (req, res) => {
   const user = db.prepare('SELECT id, username, total_points FROM users WHERE username = ?').get(username)
   if (!user) return res.status(404).json({ error: 'User not found.' })
   res.json({ user })
+})
+
+app.get('/api/weekly-matches', requireUser, (req, res) => {
+  const sessions = db.prepare(`SELECT w.*, r.user_id AS current_user_registered,
+      (SELECT COUNT(*) FROM weekly_match_registrations registrations WHERE registrations.session_id = w.id) AS registered_count
+    FROM weekly_match_sessions w
+    LEFT JOIN weekly_match_registrations r ON r.session_id = w.id AND r.user_id = ?
+    WHERE w.starts_at >= ? ORDER BY w.starts_at ASC`).all(req.authUser.id, new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+  const registrationQuery = db.prepare(`SELECT u.id, u.username, r.registered_at
+    FROM weekly_match_registrations r JOIN users u ON u.id = r.user_id
+    WHERE r.session_id = ? ORDER BY r.registered_at ASC`)
+  const pairingQuery = db.prepare(`SELECT p.pairing_order, p.player_one_id, p.player_two_id, one.username AS player_one_name, two.username AS player_two_name
+    FROM weekly_match_pairings p JOIN users one ON one.id = p.player_one_id JOIN users two ON two.id = p.player_two_id
+    WHERE p.session_id = ? ORDER BY p.pairing_order ASC`)
+  res.json({ sessions: sessions.map((session) => ({ ...session, registered: Boolean(session.current_user_registered), registrations: registrationQuery.all(session.id), pairings: pairingQuery.all(session.id) })) })
+})
+
+app.post('/api/weekly-matches', requireUser, (req, res) => {
+  const startsAt = new Date(String(req.body?.startsAt || ''))
+  const requiredPlayers = Number(req.body?.requiredPlayers)
+  const courtName = String(req.body?.courtName || '').trim().slice(0, 120)
+  const courtNumbers = String(req.body?.courtNumbers || '').trim().slice(0, 80)
+  if (Number.isNaN(startsAt.getTime()) || startsAt <= new Date()) return res.status(400).json({ error: 'Choose a future date and time.' })
+  if (!Number.isInteger(requiredPlayers) || requiredPlayers < 2 || requiredPlayers > 64 || requiredPlayers % 2 !== 0) return res.status(400).json({ error: 'Choose an even number of players between 2 and 64.' })
+  if (!courtName || !courtNumbers) return res.status(400).json({ error: 'Enter the tennis court name and court numbers.' })
+  const session = db.prepare(`INSERT INTO weekly_match_sessions (starts_at, required_players, court_name, court_numbers, created_by_user_id)
+    VALUES (?, ?, ?, ?, ?) RETURNING *`).get(startsAt.toISOString(), requiredPlayers, courtName || null, courtNumbers || null, req.authUser.id)
+  res.status(201).json({ session })
+})
+
+app.patch('/api/weekly-matches/:id', requireUser, (req, res) => {
+  const sessionId = Number(req.params.id)
+  const session = db.prepare('SELECT * FROM weekly_match_sessions WHERE id = ?').get(sessionId)
+  if (!session) return res.status(404).json({ error: 'Weekly match not found.' })
+  if (new Date() >= new Date(session.starts_at)) return res.status(400).json({ error: 'A weekly match cannot be changed after it starts.' })
+  const startsAt = new Date(String(req.body?.startsAt || ''))
+  const requiredPlayers = Number(req.body?.requiredPlayers)
+  const courtName = String(req.body?.courtName || '').trim().slice(0, 120)
+  const courtNumbers = String(req.body?.courtNumbers || '').trim().slice(0, 80)
+  if (Number.isNaN(startsAt.getTime()) || startsAt <= new Date()) return res.status(400).json({ error: 'Choose a future date and time.' })
+  if (!Number.isInteger(requiredPlayers) || requiredPlayers < 2 || requiredPlayers > 64 || requiredPlayers % 2 !== 0) return res.status(400).json({ error: 'Choose an even number of players between 2 and 64.' })
+  if (!courtName || !courtNumbers) return res.status(400).json({ error: 'Enter the tennis court name and court numbers.' })
+  db.transaction(() => {
+    db.prepare('UPDATE weekly_match_sessions SET starts_at = ?, required_players = ?, court_name = ?, court_numbers = ?, draw_generated_at = NULL WHERE id = ?').run(startsAt.toISOString(), requiredPlayers, courtName || null, courtNumbers || null, sessionId)
+    db.prepare('DELETE FROM weekly_match_pairings WHERE session_id = ?').run(sessionId)
+  })()
+  res.json({ updated: true })
+})
+
+app.delete('/api/weekly-matches/:id', requireOrganizer, (req, res) => {
+  const sessionId = Number(req.params.id)
+  const result = db.prepare('DELETE FROM weekly_match_sessions WHERE id = ?').run(sessionId)
+  if (!result.changes) return res.status(404).json({ error: 'Weekly match not found.' })
+  res.json({ deleted: true })
+})
+
+app.post('/api/weekly-matches/:id/registrations', requireUser, (req, res) => {
+  const sessionId = Number(req.params.id)
+  const session = db.prepare('SELECT * FROM weekly_match_sessions WHERE id = ?').get(sessionId)
+  if (!session) return res.status(404).json({ error: 'Weekly match not found.' })
+  const registrationClosesAt = new Date(new Date(session.starts_at).getTime() - 60 * 60 * 1000)
+  if (new Date() >= registrationClosesAt) return res.status(400).json({ error: 'Registration closes one hour before this weekly match.' })
+  db.transaction(() => {
+    db.prepare('INSERT OR IGNORE INTO weekly_match_registrations (session_id, user_id) VALUES (?, ?)').run(sessionId, req.authUser.id)
+    db.prepare('DELETE FROM weekly_match_pairings WHERE session_id = ?').run(sessionId)
+    db.prepare('UPDATE weekly_match_sessions SET draw_generated_at = NULL WHERE id = ?').run(sessionId)
+  })()
+  res.status(201).json({ registration: 'registered' })
+})
+
+app.delete('/api/weekly-matches/:id/registrations', requireUser, (req, res) => {
+  const sessionId = Number(req.params.id)
+  const session = db.prepare('SELECT * FROM weekly_match_sessions WHERE id = ?').get(sessionId)
+  if (!session) return res.status(404).json({ error: 'Weekly match not found.' })
+  const registrationClosesAt = new Date(new Date(session.starts_at).getTime() - 60 * 60 * 1000)
+  if (new Date() >= registrationClosesAt) return res.status(400).json({ error: 'Registration closes one hour before this weekly match.' })
+  const result = db.prepare('DELETE FROM weekly_match_registrations WHERE session_id = ? AND user_id = ?').run(sessionId, req.authUser.id)
+  if (!result.changes) return res.status(404).json({ error: 'You are not registered for this weekly match.' })
+  db.transaction(() => {
+    db.prepare('DELETE FROM weekly_match_pairings WHERE session_id = ?').run(sessionId)
+    db.prepare('UPDATE weekly_match_sessions SET draw_generated_at = NULL WHERE id = ?').run(sessionId)
+  })()
+  res.json({ registration: 'withdrawn' })
+})
+
+app.post('/api/weekly-matches/:id/draw/generate', requireUser, (req, res) => {
+  const sessionId = Number(req.params.id)
+  const session = db.prepare('SELECT * FROM weekly_match_sessions WHERE id = ?').get(sessionId)
+  if (!session) return res.status(404).json({ error: 'Weekly match not found.' })
+  if (session.draw_generated_at) return res.status(400).json({ error: 'Pairings have already been generated.' })
+  const generationOpensAt = new Date(new Date(session.starts_at).getTime() - 60 * 60 * 1000)
+  if (new Date() < generationOpensAt) return res.status(400).json({ error: 'Random pairings can be generated one hour before play.' })
+  if (new Date() >= new Date(session.starts_at)) return res.status(400).json({ error: 'This weekly match has already started.' })
+  const registrations = db.prepare('SELECT user_id FROM weekly_match_registrations WHERE session_id = ? ORDER BY registered_at ASC LIMIT ?').all(sessionId, session.required_players)
+  if (registrations.length < 2) return res.status(400).json({ error: 'At least two players are needed to generate pairings.' })
+  // With an odd field, the latest registration among the selected players sits out.
+  const selectedRegistrations = registrations.length % 2 === 0 ? registrations : registrations.slice(0, -1)
+  const selectedPlayers = shuffle(selectedRegistrations.map((registration) => registration.user_id))
+  const generatePairings = db.transaction(() => {
+    const insertPairing = db.prepare('INSERT INTO weekly_match_pairings (session_id, pairing_order, player_one_id, player_two_id) VALUES (?, ?, ?, ?)')
+    for (let index = 0; index + 1 < selectedPlayers.length; index += 2) insertPairing.run(sessionId, index / 2 + 1, selectedPlayers[index], selectedPlayers[index + 1])
+    db.prepare('UPDATE weekly_match_sessions SET draw_generated_at = ? WHERE id = ?').run(new Date().toISOString(), sessionId)
+  })
+  generatePairings()
+  res.json({ generated: true, selectedPlayers: Math.floor(selectedPlayers.length / 2) * 2 })
 })
 
 app.get('/api/organizer/users', requireOrganizer, (_req, res) => {
