@@ -1,46 +1,56 @@
 # Rally
 
-Rally is a simple site for organizing friendly tennis tournaments.
+Rally helps a group of friends organize tennis tournaments and casual weekly court sessions.
 
 ## Getting started
 
 1. Open the Rally link shared by your organizer.
-2. Choose **Sign up** to create your username and password, or **Sign in** if you already have one.
-3. You will stay signed in on that device, so you can come back anytime.
+2. Choose **Sign in** if you already have an account.
+3. Create an account if the organizer has provided you with signup access.
+
+You stay signed in on that device. Use **Switch** in the top-right corner to use a different account.
+
+## Weekly matches
+
+The **Weekly Matches** page is for casual court sessions.
+
+- Any signed-in player can create a session with its date, time, court, and number of players needed.
+- Register or withdraw until one hour before play.
+- More players can register than there are spots; the earliest registrations fill the available places.
+- During the last hour before play, anyone can generate random pairings.
+- If there is an odd number of selected players, the most recently registered selected player sits out.
+
+Weekly matches do not award leaderboard points and do not record scores.
 
 ## Tournaments
 
-The Tournaments page has three sections:
+The **Tournaments** page is organized into:
 
-- **Current** — tournaments happening now. You will see the ones you are registered for.
-- **Upcoming** — future tournaments that are open to discover and join.
+- **Current** — tournaments happening now. You see the ones you registered for.
+- **Upcoming** — future events you can discover and join.
 - **Past** — completed tournaments you took part in.
 
-Open a tournament card to see its players and draw.
+Open any tournament card to see the registered players and, when available, its draw.
 
-## Joining or withdrawing
+### Registering and withdrawing
 
-On an upcoming tournament:
+- Select **Register** to join an upcoming tournament if space is available.
+- The card shows remaining capacity and the registration deadline.
+- Before that deadline, the same button becomes **Withdraw** if you are registered.
+- Registration closes four days before the tournament; after that, the player list is final.
 
-- Select **Register** to join, if space is available.
-- Once registered, the button changes to **Withdraw**.
-- You can withdraw only before the registration deadline shown on the tournament card.
+## Draws and scores
 
-After registration closes, the player list is finalized and you cannot register or withdraw.
-
-## Draws and match scores
-
-- The draw is normally available two days before the tournament starts, or earlier when the organizer publishes it.
-- Select the **Draw** tab to see your match and progress through the bracket.
-- During a current tournament, either player in a match can select that match and enter the score.
-- Rally supports one-set matches for Rally 250 events and best-of-three matches for Rally 500 events. In Rally 500, a tied match goes to a 10-point match tiebreak.
-
-Once a score is saved, the winner moves forward in the draw automatically.
+- Draws normally become visible two days before play, or earlier if the organizer publishes them.
+- In a current tournament, tap your match to enter its score.
+- Either player may submit a score once. Only the organizer can correct a submitted result.
+- Winners advance automatically in the bracket.
+- **Rally 250** uses one set. **Rally 500** uses best of three sets, with a first-to-10 match tiebreak if the first two sets are split.
 
 ## Leaderboard
 
-The **Leaderboard** ranks players by their tournament points. Points are awarded as results are entered, and players with zero points do not appear in the rankings.
+Tournament match wins earn points, with later rounds worth more. Rally 250 and Rally 500 events have different point totals. Points expire 180 days after a tournament ends, and players with zero points do not appear on the leaderboard.
 
 ## Need help?
 
-If registration is closed, the draw is missing, or you need a correction to a score, contact the tournament organizer.
+If a registration is closed, a draw has not been published, or a score needs correcting, contact the tournament organizer.

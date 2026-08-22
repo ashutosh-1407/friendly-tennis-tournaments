@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "savedAt": "2026-08-22T02:40:05.897Z",
+  "savedAt": "2026-08-22T04:02:03.565Z",
   "users": [
     {
       "id": 1,
@@ -172,6 +172,84 @@
       "updated_at": "2026-08-19 04:16:04",
       "password_hash": null,
       "name": null
+    },
+    {
+      "id": 20,
+      "username": "test",
+      "total_points": 0,
+      "created_at": "2026-08-22 03:56:39",
+      "updated_at": "2026-08-22 03:56:39",
+      "password_hash": "0438e3d931fc0f4bcebe28d2e15abf89:6059e356585217f59b0c865ce3785d109285a40164b3523b9c9bfe3330bac7d5a8cad80deb7f487a773bb6c292d96fbc6e1dc121836a1ee9711f291178ce4a13",
+      "name": null
+    },
+    {
+      "id": 21,
+      "username": "tsts1",
+      "total_points": 0,
+      "created_at": "2026-08-22 04:01:59",
+      "updated_at": "2026-08-22 04:01:59",
+      "password_hash": "8225a75a25fe211a4c9511bcdaec2c08:83a6d9b369b87291e9c0a2be030193df8b1ddfb9f38de4a2774a05b16eea559766be131d2c09fde67326aca778b9465b4feea9165b94a88d96ff3b0ee6512033",
+      "name": null
+    }
+  ],
+  "access_requests": [
+    {
+      "id": 1,
+      "requested_username": "test",
+      "requested_name": null,
+      "message": "Can you please give access?",
+      "status": "approved",
+      "created_at": "2026-08-22 03:46:01",
+      "reviewed_at": "2026-08-22 03:56:39",
+      "seen_at": "2026-08-22 03:52:08"
+    },
+    {
+      "id": 2,
+      "requested_username": "testing",
+      "requested_name": "test",
+      "message": "hello",
+      "status": "approved",
+      "created_at": "2026-08-22 03:58:41",
+      "reviewed_at": "2026-08-22 04:01:59",
+      "seen_at": "2026-08-22 03:58:58"
+    }
+  ],
+  "signup_invites": [
+    {
+      "id": 1,
+      "access_request_id": 1,
+      "code_hash": "ba4c853f93387ea681028dc644b5d7dc:3a6b9781f17e4be686e2bc7a47d98d98149bd01b22b916d85b7857932f3fe09ed45e4a4a6aa3c7329edcef916ad8f4fa82ecf833dd5d2e56ca09fb63724d62b3",
+      "created_by_user_id": 1,
+      "created_at": "2026-08-22 03:52:19",
+      "expires_at": "2026-08-23T03:52:19.007Z",
+      "used_at": "2026-08-22 03:56:39"
+    },
+    {
+      "id": 2,
+      "access_request_id": 2,
+      "code_hash": "7afb2a8056d30b195a9bae2766fbc04e:968d1e2f4a68f464ea0133b508325e9a4483307b18c73099173ec55ec291979e12212d82382abecd6f41b9f734a12c7264f0f2c306e8b59ef81458331d73bbb8",
+      "created_by_user_id": 1,
+      "created_at": "2026-08-22 03:59:00",
+      "expires_at": "2026-08-22 04:01:28",
+      "used_at": null
+    },
+    {
+      "id": 3,
+      "access_request_id": 2,
+      "code_hash": "4c7f5c230798de080117a6b7ff7cc734:6fad84292e1de22a8b4af1a6e4b5d205636b056b42a871c40e28aa2b3527a7751a472d6cdd1ea4923516c906bb05adb2ad56aa646309e9e2ea2be1b2a7ee6b1d",
+      "created_by_user_id": 1,
+      "created_at": "2026-08-22 04:00:45",
+      "expires_at": "2026-08-22 04:01:28",
+      "used_at": null
+    },
+    {
+      "id": 4,
+      "access_request_id": 2,
+      "code_hash": "502e3c3f9906a679d76190fbf7ba5e1a:a97b92d6af85a298ef934136630ffb5b668069ea33c7a46ce5a6be8b936d7fcd60d637890029cbd476751a7d0600fcfecf02ad31f1947f6748cd66a0260a9536",
+      "created_by_user_id": 1,
+      "created_at": "2026-08-22 04:01:28",
+      "expires_at": "2026-08-23T04:01:28.476Z",
+      "used_at": "2026-08-22 04:01:59"
     }
   ],
   "tournaments": [
@@ -850,12 +928,6 @@
       "user_id": 1,
       "expires_at": "2026-09-19T19:47:03.061Z",
       "created_at": "2026-08-20 19:47:03"
-    },
-    {
-      "token": "7e718db1ddfc4d148dd88765617fe34ddaaedb9690adbdb0f5723ff706457ba1",
-      "user_id": 1,
-      "expires_at": "2026-09-21T00:36:16.394Z",
-      "created_at": "2026-08-22 00:36:16"
     }
   ]
 }

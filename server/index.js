@@ -8,6 +8,7 @@ import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const organizerUsername = 'ashutosh.1407'
 const organizerPasscode = process.env.ORGANIZER_PASSCODE || ''
+const inviteOnlySignup = process.env.INVITE_ONLY_SIGNUP === 'true'
 const tournamentTiers = {
   rally_250: { label: 'Rally 250 · Court Sprint', points: 250, maxPlayers: 16, days: 1, scoring: 'single_set' },
   rally_500: { label: 'Rally 500 · Weekend Classic', points: 500, maxPlayers: 32, days: 2, scoring: 'best_of_three' },
@@ -39,6 +40,9 @@ if (!db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name = 'password
 if (!db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name = 'name'").get()) {
   db.exec('ALTER TABLE users ADD COLUMN name TEXT')
 }
+if (!db.prepare("SELECT 1 FROM pragma_table_info('access_requests') WHERE name = 'seen_at'").get()) {
+  db.exec('ALTER TABLE access_requests ADD COLUMN seen_at TEXT')
+}
 if (!db.prepare("SELECT 1 FROM pragma_table_info('tournaments') WHERE name = 'tournament_tier'").get()) {
   db.exec("ALTER TABLE tournaments ADD COLUMN tournament_tier TEXT NOT NULL DEFAULT 'rally_500' CHECK (tournament_tier IN ('rally_250', 'rally_500'))")
 }
@@ -51,7 +55,7 @@ if (!db.prepare("SELECT 1 FROM pragma_table_info('weekly_match_sessions') WHERE 
 
 const snapshotPath = path.join(dataDirectory, 'rally.json')
 const bundledSnapshotPath = path.join(bundledDataDirectory, 'rally.json')
-const snapshotTables = ['users', 'tournaments', 'tournament_players', 'matches', 'match_results', 'weekly_match_sessions', 'weekly_match_registrations', 'weekly_match_pairings', 'sessions']
+const snapshotTables = ['users', 'access_requests', 'signup_invites', 'tournaments', 'tournament_players', 'matches', 'match_results', 'weekly_match_sessions', 'weekly_match_registrations', 'weekly_match_pairings', 'sessions']
 
 // A new Railway Volume starts empty. Seed it once from the deployed snapshot,
 // then all later changes are saved only on the persistent Volume.
@@ -96,7 +100,7 @@ function restoreDatabase() {
   if (!fs.existsSync(snapshotPath)) return false
   const snapshot = JSON.parse(fs.readFileSync(snapshotPath, 'utf8'))
   const restore = db.transaction(() => {
-    db.exec('DELETE FROM sessions; DELETE FROM match_results; DELETE FROM matches; DELETE FROM tournament_players; DELETE FROM weekly_match_pairings; DELETE FROM weekly_match_registrations; DELETE FROM weekly_match_sessions; DELETE FROM tournaments; DELETE FROM users;')
+    db.exec('DELETE FROM sessions; DELETE FROM signup_invites; DELETE FROM access_requests; DELETE FROM match_results; DELETE FROM matches; DELETE FROM tournament_players; DELETE FROM weekly_match_pairings; DELETE FROM weekly_match_registrations; DELETE FROM weekly_match_sessions; DELETE FROM tournaments; DELETE FROM users;')
     for (const table of snapshotTables) {
       const rows = Array.isArray(snapshot[table]) ? snapshot[table] : []
       if (!rows.length) continue
@@ -171,6 +175,10 @@ function hashPassword(password) {
   return `${salt}:${scryptSync(password, salt, 64).toString('hex')}`
 }
 
+function generateInviteCode() {
+  return randomBytes(9).toString('base64url').toUpperCase().match(/.{1,4}/g).join('-')
+}
+
 function passwordMatches(password, storedHash) {
   if (!storedHash) return false
   const [salt, expected] = storedHash.split(':')
@@ -188,6 +196,7 @@ app.post('/api/auth/signup', (req, res) => {
   const username = String(req.body?.username || '').trim()
   const name = String(req.body?.name || '').trim().slice(0, 80) || null
   const password = String(req.body?.password || '')
+  const inviteCode = String(req.body?.inviteCode || '').trim().toUpperCase()
   const error = validateCredentials(username, password)
   if (error) return res.status(400).json({ error })
   const existing = db.prepare('SELECT id, username, name, total_points, password_hash FROM users WHERE username = ?').get(username)
@@ -198,10 +207,37 @@ app.post('/api/auth/signup', (req, res) => {
     startSession(res, user)
     return res.json({ user })
   }
-  const user = db.prepare('INSERT INTO users (username, name, password_hash) VALUES (?, ?, ?) RETURNING id, username, name, total_points').get(username, name, hashPassword(password))
+  if (inviteOnlySignup && !inviteCode) return res.status(403).json({ error: 'A valid invite code is required to create an account.' })
+  const invites = inviteOnlySignup ? db.prepare("SELECT * FROM signup_invites WHERE used_at IS NULL AND expires_at > ?").all(new Date().toISOString()) : []
+  const invite = inviteOnlySignup ? invites.find((candidate) => passwordMatches(inviteCode, candidate.code_hash)) : null
+  if (inviteOnlySignup && !invite) return res.status(403).json({ error: 'This invite code is invalid or has expired.' })
+  const createUser = db.transaction(() => {
+    const created = db.prepare('INSERT INTO users (username, name, password_hash) VALUES (?, ?, ?) RETURNING id, username, name, total_points').get(username, name, hashPassword(password))
+    if (invite) {
+      db.prepare('UPDATE signup_invites SET used_at = CURRENT_TIMESTAMP WHERE id = ? AND used_at IS NULL').run(invite.id)
+      if (invite.access_request_id) db.prepare("UPDATE access_requests SET status = 'approved', reviewed_at = CURRENT_TIMESTAMP WHERE id = ?").run(invite.access_request_id)
+    }
+    return created
+  })
+  const user = createUser()
   startSession(res, user)
   res.status(201).json({ user })
 })
+
+app.post('/api/access-requests', (req, res) => {
+  if (!inviteOnlySignup) return res.status(404).json({ error: 'Access requests are not enabled.' })
+  const requestedUsername = String(req.body?.username || '').trim()
+  const requestedName = String(req.body?.name || '').trim().slice(0, 80) || null
+  const message = String(req.body?.message || '').trim().slice(0, 500) || null
+  if (requestedUsername.length < 2 || requestedUsername.length > 32) return res.status(400).json({ error: 'Choose a username between 2 and 32 characters.' })
+  if (db.prepare('SELECT 1 FROM users WHERE username = ?').get(requestedUsername)) return res.status(409).json({ error: 'That username is already in use.' })
+  const duplicate = db.prepare("SELECT 1 FROM access_requests WHERE requested_username = ? AND status = 'pending'").get(requestedUsername)
+  if (duplicate) return res.status(409).json({ error: 'There is already a pending request for that username.' })
+  db.prepare('INSERT INTO access_requests (requested_username, requested_name, message) VALUES (?, ?, ?)').run(requestedUsername, requestedName, message)
+  res.status(201).json({ requested: true })
+})
+
+app.get('/api/config', (_req, res) => res.json({ inviteOnlySignup }))
 
 app.post('/api/auth/signin', (req, res) => {
   const username = String(req.body?.username || '').trim()
@@ -383,6 +419,42 @@ function isOrganizer(req) {
 function isOrganizerAccount(req) {
   return req.authUser?.username?.toLowerCase() === organizerUsername
 }
+
+function requireOrganizerAccount(req, res, next) {
+  if (!isOrganizerAccount(req)) return res.status(403).json({ error: 'Organizer access is required.' })
+  next()
+}
+
+app.get('/api/organizer/access-requests/unread', requireOrganizerAccount, (_req, res) => {
+  if (!inviteOnlySignup) return res.status(404).json({ error: 'Access requests are not enabled.' })
+  const count = db.prepare("SELECT COUNT(*) AS count FROM access_requests WHERE status = 'pending' AND seen_at IS NULL").get().count
+  res.json({ count })
+})
+
+app.get('/api/organizer/access-requests', requireOrganizer, (_req, res) => {
+  if (!inviteOnlySignup) return res.status(404).json({ error: 'Access requests are not enabled.' })
+  const requests = db.prepare(`SELECT r.*, EXISTS(
+      SELECT 1 FROM signup_invites i WHERE i.access_request_id = r.id AND i.used_at IS NULL AND i.expires_at > ?
+    ) AS has_active_invite
+    FROM access_requests r
+    ORDER BY CASE r.status WHEN 'pending' THEN 0 ELSE 1 END, r.created_at DESC`).all(new Date().toISOString())
+  db.prepare("UPDATE access_requests SET seen_at = CURRENT_TIMESTAMP WHERE status = 'pending' AND seen_at IS NULL").run()
+  res.json({ requests })
+})
+
+app.post('/api/organizer/access-requests/:id/invite', requireOrganizer, (req, res) => {
+  if (!inviteOnlySignup) return res.status(404).json({ error: 'Access requests are not enabled.' })
+  const requestId = Number(req.params.id)
+  const accessRequest = db.prepare("SELECT * FROM access_requests WHERE id = ? AND status = 'pending'").get(requestId)
+  if (!accessRequest) return res.status(404).json({ error: 'Pending access request not found.' })
+  const code = generateInviteCode()
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+  db.transaction(() => {
+    db.prepare('UPDATE signup_invites SET expires_at = CURRENT_TIMESTAMP WHERE access_request_id = ? AND used_at IS NULL').run(requestId)
+    db.prepare('INSERT INTO signup_invites (access_request_id, code_hash, created_by_user_id, expires_at) VALUES (?, ?, ?, ?)').run(requestId, hashPassword(code), req.authUser.id, expiresAt)
+  })()
+  res.status(201).json({ code, expiresAt })
+})
 
 app.post('/api/tournaments', requireOrganizer, (req, res) => {
   const name = String(req.body?.name || '').trim()

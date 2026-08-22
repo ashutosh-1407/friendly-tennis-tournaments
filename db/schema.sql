@@ -18,6 +18,27 @@ CREATE TABLE IF NOT EXISTS sessions (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS access_requests (
+  id INTEGER PRIMARY KEY,
+  requested_username TEXT NOT NULL COLLATE NOCASE,
+  requested_name TEXT,
+  message TEXT,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  seen_at TEXT,
+  reviewed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS signup_invites (
+  id INTEGER PRIMARY KEY,
+  access_request_id INTEGER REFERENCES access_requests(id) ON DELETE SET NULL,
+  code_hash TEXT NOT NULL,
+  created_by_user_id INTEGER NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  expires_at TEXT NOT NULL,
+  used_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS tournaments (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
@@ -107,6 +128,7 @@ GROUP BY u.id, u.username, u.total_points;
 
 CREATE INDEX IF NOT EXISTS idx_tournaments_status_starts_at ON tournaments(status, starts_at);
 CREATE INDEX IF NOT EXISTS idx_tournament_players_user ON tournament_players(user_id, registration_status);
+CREATE INDEX IF NOT EXISTS idx_access_requests_status ON access_requests(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_matches_tournament ON matches(tournament_id, status);
 CREATE INDEX IF NOT EXISTS idx_weekly_match_sessions_starts_at ON weekly_match_sessions(starts_at);
 CREATE INDEX IF NOT EXISTS idx_weekly_match_registrations_session ON weekly_match_registrations(session_id, registered_at);

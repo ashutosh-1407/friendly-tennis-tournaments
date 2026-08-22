@@ -118,6 +118,10 @@ function WeeklyMatchCreatePage({ draft, onDraftChange, onCreate, isCreating, err
   return <section className="page create-page" aria-labelledby="weekly-create-title"><button className="back-button" onClick={onBack}>← Back to weekly matches</button><div className="create-heading"><p className="eyebrow">CASUAL COURT TIME</p><h1 id="weekly-create-title">{isEditing ? 'Edit weekly match' : 'Create a weekly match'}</h1><p>Set the date, time, courts, and number of players needed.</p></div><form className="weekly-form" onSubmit={onCreate}><div className="form-grid"><label>Date<input type="date" name="date" value={draft.date} onChange={onDraftChange} required autoFocus /></label><label>Time<input type="time" name="time" value={draft.time} onChange={onDraftChange} required /></label><label>Tennis court name<input name="courtName" value={draft.courtName} onChange={onDraftChange} placeholder="e.g. Riverside Tennis Center" maxLength="120" required /></label><label>Court numbers<input name="courtNumbers" value={draft.courtNumbers} onChange={onDraftChange} placeholder="e.g. 1, 2, 3" maxLength="80" required /></label><label>Players needed<input type="number" name="requiredPlayers" value={draft.requiredPlayers} onChange={onDraftChange} min="2" max="64" step="2" required /><span className="tier-description">Use an even number. Earliest registrations get the available spots.</span></label></div>{error && <p className="creation-error" role="alert">{error}</p>}<div className="form-actions"><button type="button" className="cancel-button" onClick={onBack}>Cancel</button><button type="submit" className="primary-action" disabled={isCreating}>{isCreating ? 'Saving…' : verb}</button></div></form></section>
 }
 
+function AccessRequestsPage({ requests, error, isLoading, onGenerate, generatedInvite, onDismissInvite }) {
+  return <section className="page" aria-labelledby="messages-title"><div className="page-heading"><div><p className="eyebrow">ORGANIZER TOOLS</p><h1 id="messages-title">Messages</h1><p>Review requests and create one-time signup codes.</p></div></div>{generatedInvite && <div className="notice generated-invite">Invite code: <strong>{generatedInvite}</strong> — expires in 24 hours. Send it to the player privately.<button type="button" onClick={onDismissInvite} aria-label="Dismiss invite code">×</button></div>}{error && <p className="creation-error">{error}</p>}{isLoading ? <p className="detail-loading">Loading access requests…</p> : <div className="users-table access-requests">{requests.length ? requests.map((request) => <div className="user-row access-request" key={request.id}><div><strong>{request.requested_name || request.requested_username}</strong><span>@{request.requested_username} · {new Date(request.created_at).toLocaleDateString()}</span>{request.message && <p>{request.message}</p>}</div>{request.status === 'pending' ? <button className="secondary-action" onClick={() => onGenerate(request.id)}>Generate invite</button> : <span className="registered">Approved</span>}</div>) : <p className="empty-inline">No access requests yet.</p>}</div>}</section>
+}
+
 function ScoreEntryModal({ match, onClose, onSave, isSaving, error, isSingleSet }) {
   const blankSet = { playerOneGames: '', playerTwoGames: '', tiebreakPlayerOne: '', tiebreakPlayerTwo: '' }
   const [sets, setSets] = React.useState(() => isSingleSet ? [blankSet] : [blankSet, blankSet, { playerOnePoints: '', playerTwoPoints: '' }])
@@ -136,7 +140,11 @@ function App() {
   const [draftPassword, setDraftPassword] = React.useState('')
   const [draftProfileName, setDraftProfileName] = React.useState('')
   const [isPasswordVisible, setIsPasswordVisible] = React.useState(false)
-  const [authMode, setAuthMode] = React.useState('signin')
+  const [authMode, setAuthMode] = React.useState(() => window.location.pathname === '/signup' ? 'signup' : 'signin')
+  const [inviteOnlySignup, setInviteOnlySignup] = React.useState(null)
+  const [inviteCode, setInviteCode] = React.useState(() => new URLSearchParams(window.location.search).get('code') || '')
+  const [accessMessage, setAccessMessage] = React.useState('')
+  const [accessRequestSent, setAccessRequestSent] = React.useState(false)
   const [activeTab, setActiveTab] = React.useState(() => ['weekly', 'tournaments', 'leaderboard'].includes(localStorage.getItem(ACTIVE_TAB_KEY)) ? localStorage.getItem(ACTIVE_TAB_KEY) : 'tournaments')
   const [tournamentFilter, setTournamentFilter] = React.useState('upcoming')
   const [notice, setNotice] = React.useState('')
@@ -175,6 +183,11 @@ function App() {
   const [usersPage, setUsersPage] = React.useState(1)
   const [leaderboardPage, setLeaderboardPage] = React.useState(1)
   const [passcodePrompt, setPasscodePrompt] = React.useState(null)
+  const [accessRequests, setAccessRequests] = React.useState([])
+  const [accessRequestsError, setAccessRequestsError] = React.useState('')
+  const [isLoadingAccessRequests, setIsLoadingAccessRequests] = React.useState(false)
+  const [generatedInvite, setGeneratedInvite] = React.useState('')
+  const [unreadAccessRequestCount, setUnreadAccessRequestCount] = React.useState(0)
 
   function requestOrganizerPasscode() {
     if (organizerPasscode) return Promise.resolve(organizerPasscode)
@@ -192,6 +205,14 @@ function App() {
     passcodePrompt?.resolve('')
     setPasscodePrompt(null)
   }
+
+  React.useEffect(() => {
+    fetch('/api/config').then((response) => response.ok ? response.json() : { inviteOnlySignup: false }).then((data) => setInviteOnlySignup(Boolean(data.inviteOnlySignup))).catch(() => setInviteOnlySignup(false))
+  }, [])
+
+  React.useEffect(() => {
+    if (inviteOnlySignup && authMode === 'signup' && window.location.pathname !== '/signup') setAuthMode('request')
+  }, [inviteOnlySignup, authMode])
 
   React.useEffect(() => {
     fetch('/api/auth/session')
@@ -222,7 +243,7 @@ function App() {
       const response = await fetch(`/api/auth/${authMode}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: cleanName, password: draftPassword, name: authMode === 'signup' ? draftProfileName : '' }),
+        body: JSON.stringify({ username: cleanName, password: draftPassword, name: authMode === 'signup' ? draftProfileName : '', inviteCode }),
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Unable to save your username.')
@@ -237,6 +258,20 @@ function App() {
     } finally {
       setIsSavingUsername(false)
     }
+  }
+
+  async function requestAccess(event) {
+    event.preventDefault()
+    const cleanName = draftName.trim()
+    if (!cleanName) return
+    setIsSavingUsername(true)
+    setUsernameError('')
+    try {
+      const response = await fetch('/api/access-requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: cleanName, name: draftProfileName, message: accessMessage }) })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Unable to send your request.')
+      setAccessRequestSent(true)
+    } catch (error) { setUsernameError(error.message) } finally { setIsSavingUsername(false) }
   }
 
   async function resetOrganizerPassword() {
@@ -341,6 +376,43 @@ function App() {
       .catch((error) => setUsersError(error.message))
     })()
   }, [activeTab, isOrganizer, organizerPasscode])
+
+  React.useEffect(() => {
+    if (activeTab !== 'messages' || !isOrganizer) return
+    ;(async () => {
+      const passcode = await requestOrganizerPasscode()
+      if (!passcode) { setAccessRequestsError('An organizer passcode is required to view access requests.'); return }
+      setIsLoadingAccessRequests(true)
+      setAccessRequestsError('')
+      try {
+        const response = await fetch('/api/organizer/access-requests', { headers: { 'x-rally-organizer-passcode': passcode } })
+        const data = await response.json()
+        if (!response.ok) throw new Error(data.error || 'Unable to load access requests.')
+        setAccessRequests(data.requests || [])
+      } catch (error) { setAccessRequestsError(error.message) } finally { setIsLoadingAccessRequests(false) }
+    })()
+  }, [activeTab, isOrganizer, organizerPasscode])
+
+  React.useEffect(() => {
+    if (!isOrganizer || !inviteOnlySignup) { setUnreadAccessRequestCount(0); return }
+    const loadUnreadCount = () => fetch('/api/organizer/access-requests/unread').then((response) => response.ok ? response.json() : { count: 0 }).then((data) => setUnreadAccessRequestCount(Number(data.count) || 0)).catch(() => {})
+    loadUnreadCount()
+    const interval = window.setInterval(loadUnreadCount, 60 * 1000)
+    return () => window.clearInterval(interval)
+  }, [isOrganizer, inviteOnlySignup, activeTab])
+
+  async function generateInvite(requestId) {
+    const passcode = await requestOrganizerPasscode()
+    if (!passcode) return
+    setAccessRequestsError('')
+    try {
+      const response = await fetch(`/api/organizer/access-requests/${requestId}/invite`, { method: 'POST', headers: { 'x-rally-organizer-passcode': passcode } })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Unable to generate invite.')
+      setGeneratedInvite(data.code)
+      setAccessRequests((requests) => requests.map((request) => request.id === requestId ? { ...request, has_active_invite: 1 } : request))
+    } catch (error) { setAccessRequestsError(error.message) }
+  }
 
   async function registerForTournament(tournament) {
     setRegistrationError('')
@@ -734,15 +806,22 @@ function App() {
           <p className="intro">Join local tournaments, follow your results, and see where you stand.</p>
           <div className="auth-tabs" role="tablist" aria-label="Account access">
             <button type="button" role="tab" aria-selected={authMode === 'signin'} className={authMode === 'signin' ? 'active' : ''} onClick={() => { setAuthMode('signin'); setUsernameError('') }}>Sign in</button>
-            <button type="button" role="tab" aria-selected={authMode === 'signup'} className={authMode === 'signup' ? 'active' : ''} onClick={() => { setAuthMode('signup'); setUsernameError('') }}>Sign up</button>
+            <button type="button" role="tab" aria-selected={authMode !== 'signin'} className={authMode !== 'signin' ? 'active' : ''} onClick={() => { setAuthMode(inviteOnlySignup ? 'request' : 'signup'); setUsernameError(''); setAccessRequestSent(false) }}>{inviteOnlySignup ? 'Request access' : 'Sign up'}</button>
           </div>
-          <form onSubmit={continueAsUser}>
-            <label htmlFor="username">{authMode === 'signin' ? 'Your username' : 'Choose a username'}</label>
+          {inviteOnlySignup && authMode === 'request' ? <form onSubmit={requestAccess}>
+            <label htmlFor="username">Preferred username</label>
             <div className="input-row">
               <span aria-hidden="true">@</span>
               <input id="username" value={draftName} onChange={(event) => setDraftName(event.target.value)} placeholder="e.g. topspin_taylor" autoComplete="username" maxLength="32" autoFocus />
             </div>
-            {authMode === 'signup' && <><label htmlFor="profile-name" className="password-label">Name <span className="optional">(optional)</span></label><div className="input-row"><input id="profile-name" value={draftProfileName} onChange={(event) => setDraftProfileName(event.target.value)} placeholder="e.g. Taylor Smith" autoComplete="name" maxLength="80" /></div></>}
+            <label htmlFor="profile-name" className="password-label">Name <span className="optional">(optional)</span></label><div className="input-row"><input id="profile-name" value={draftProfileName} onChange={(event) => setDraftProfileName(event.target.value)} placeholder="e.g. Taylor Smith" autoComplete="name" maxLength="80" /></div>
+            <label htmlFor="access-message" className="password-label">Message <span className="optional">(optional)</span></label><textarea id="access-message" value={accessMessage} onChange={(event) => setAccessMessage(event.target.value)} placeholder="Let the organizer know who you are." maxLength="500" rows="3" />
+            <button type="submit" disabled={!draftName.trim() || isSavingUsername}>{isSavingUsername ? 'Sending…' : 'Send access request'}</button>
+            {accessRequestSent && <p className="fine-print">Request sent. The organizer will give you a signup code directly.</p>}
+          </form> : <form onSubmit={continueAsUser}>
+            <label htmlFor="username">{authMode === 'signin' ? 'Your username' : 'Choose a username'}</label>
+            <div className="input-row"><span aria-hidden="true">@</span><input id="username" value={draftName} onChange={(event) => setDraftName(event.target.value)} placeholder="e.g. topspin_taylor" autoComplete="username" maxLength="32" autoFocus /></div>
+            {authMode === 'signup' && <>{inviteOnlySignup !== false && <><label htmlFor="invite-code" className="password-label">Invite code</label><div className="input-row"><input id="invite-code" value={inviteCode} onChange={(event) => setInviteCode(event.target.value)} placeholder="e.g. ABCD-EFGH-IJKL" autoComplete="one-time-code" required /></div></>}<label htmlFor="profile-name" className="password-label">Name <span className="optional">(optional)</span></label><div className="input-row"><input id="profile-name" value={draftProfileName} onChange={(event) => setDraftProfileName(event.target.value)} placeholder="e.g. Taylor Smith" autoComplete="name" maxLength="80" /></div></>}
             <label htmlFor="password" className="password-label">Password</label>
             <div className="input-row password-row">
               <input id="password" type={isPasswordVisible ? 'text' : 'password'} value={draftPassword} onChange={(event) => setDraftPassword(event.target.value)} placeholder="At least 6 characters" autoComplete={authMode === 'signin' ? 'current-password' : 'new-password'} minLength="6" maxLength="128" />
@@ -750,9 +829,9 @@ function App() {
             </div>
             <button type="submit" disabled={!draftName.trim() || !draftPassword || isSavingUsername}>{isSavingUsername ? 'Please wait…' : authMode === 'signin' ? <>Sign in <span aria-hidden="true">→</span></> : <>Create account <span aria-hidden="true">→</span></>}</button>
             {authMode === 'signin' && draftName.trim().toLowerCase() === ORGANIZER_USERNAME && <button type="button" className="organizer-reset" disabled={!draftPassword || isSavingUsername} onClick={resetOrganizerPassword}>Reset organizer password</button>}
-          </form>
+          </form>}
           {usernameError && <p className="form-error" role="alert">{usernameError}</p>}
-          <p className="fine-print">For an old username-only profile, use Sign up once to set its first password.</p>
+          {inviteOnlySignup && authMode === 'signup' && <p className="fine-print">Signup is invite-only. Your one-time code expires after 24 hours.</p>}
         </section>
         <footer>Built for the love of the game.</footer>
         {passcodePrompt && <OrganizerPasscodeModal onSubmit={submitOrganizerPasscode} onClose={cancelOrganizerPasscode} />}
@@ -768,6 +847,7 @@ function App() {
           <button className={['weekly', 'weekly-create', 'weekly-edit'].includes(activeTab) ? 'active' : ''} onClick={() => selectTab('weekly')}>Weekly Matches</button>
           <button className={['tournaments', 'create', 'edit-tournament'].includes(activeTab) ? 'active' : ''} onClick={() => selectTab('tournaments')}>Tournaments</button>
           <button className={activeTab === 'leaderboard' ? 'active' : ''} onClick={() => selectTab('leaderboard')}>Leaderboard</button>
+          {isOrganizer && inviteOnlySignup && <button className={activeTab === 'messages' ? 'active' : ''} onClick={() => selectTab('messages')}>Messages{unreadAccessRequestCount > 0 && <span className="message-badge" aria-label={`${unreadAccessRequestCount} new access requests`}>{unreadAccessRequestCount}</span>}</button>}
           {isOrganizer && <button className={activeTab === 'users' ? 'active' : ''} onClick={() => selectTab('users')}>Users</button>}
         </nav>
         <button className="profile" onClick={changeUser} title="Use a different username"><span className="avatar">{(name || username).slice(0, 1).toUpperCase()}</span><span>{name || `@${username}`}</span><span className="switch">Switch</span></button>
@@ -793,7 +873,7 @@ function App() {
             <div className="form-actions"><button type="button" className="cancel-button" onClick={() => selectTab('tournaments')}>Cancel</button><button type="submit" className="primary-action" disabled={isCreating}>{isCreating ? 'Saving…' : activeTab === 'edit-tournament' ? 'Save changes' : 'Create tournament'}</button></div>
           </form>
         </section>
-      ) : activeTab === 'users' && isOrganizer ? (
+      ) : activeTab === 'messages' && isOrganizer && inviteOnlySignup ? <AccessRequestsPage requests={accessRequests} error={accessRequestsError} isLoading={isLoadingAccessRequests} onGenerate={generateInvite} generatedInvite={generatedInvite} onDismissInvite={() => setGeneratedInvite('')} /> : activeTab === 'users' && isOrganizer ? (
         <section className="page" aria-labelledby="users-title">
           <div className="page-heading"><div><p className="eyebrow">ORGANIZER TOOLS</p><h1 id="users-title">Registered users</h1><p>{registeredUsers.length} players in Rally.</p></div></div>
           {usersError ? <p className="creation-error">{usersError}</p> : <><div className="users-table">{visibleUsers.map((player) => <div className="user-row" key={player.id}><strong>{displayName(player)}</strong><span>{player.total_points} pts</span></div>)}</div>{registeredUsers.length > USERS_PER_PAGE && <div className="pagination"><button className="secondary-action" disabled={usersPage === 1} onClick={() => setUsersPage((page) => page - 1)}>← Previous</button><span>Page {usersPage} of {usersPageCount}</span><button className="secondary-action" disabled={usersPage === usersPageCount} onClick={() => setUsersPage((page) => page + 1)}>Next →</button></div>}</>}
