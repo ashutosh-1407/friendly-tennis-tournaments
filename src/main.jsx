@@ -5,7 +5,6 @@ import './styles.css'
 const USERNAME_KEY = 'rally.username'
 const USER_ID_KEY = 'rally.userId'
 const ORGANIZER_PASSCODE_KEY = 'rally.organizerPasscode'
-const ACTIVE_TAB_KEY = 'rally.activeTab'
 const ORGANIZER_USERNAME = 'ashutosh.1407'
 const TOURNAMENT_TIERS = {
   rally_250: { label: 'Rally 250 · Court Sprint', points: 250, maxPlayers: 16, days: 1, scoring: 'One set' },
@@ -153,8 +152,8 @@ function App() {
   const [inviteCode, setInviteCode] = React.useState(() => new URLSearchParams(window.location.search).get('code') || '')
   const [accessMessage, setAccessMessage] = React.useState('')
   const [accessRequestSent, setAccessRequestSent] = React.useState(false)
-  const [activeTab, setActiveTab] = React.useState(() => ['weekly', 'tournaments', 'leaderboard'].includes(localStorage.getItem(ACTIVE_TAB_KEY)) ? localStorage.getItem(ACTIVE_TAB_KEY) : 'tournaments')
-  const [tournamentFilter, setTournamentFilter] = React.useState('upcoming')
+  const [activeTab, setActiveTab] = React.useState('weekly')
+  const [tournamentFilter, setTournamentFilter] = React.useState('current')
   const [notice, setNotice] = React.useState('')
   const [isSavingUsername, setIsSavingUsername] = React.useState(false)
   const [usernameError, setUsernameError] = React.useState('')
@@ -237,10 +236,6 @@ function App() {
       })
       .finally(() => setIsCheckingSession(false))
   }, [])
-
-  React.useEffect(() => {
-    if (['weekly', 'tournaments', 'leaderboard'].includes(activeTab)) localStorage.setItem(ACTIVE_TAB_KEY, activeTab)
-  }, [activeTab])
 
   async function continueAsUser(event) {
     event.preventDefault()
@@ -726,6 +721,7 @@ function App() {
   }, [tournamentDetail?.draw?.matches?.length, tournamentDetail?.draw?.rounds])
 
   function selectTab(tab) {
+    if (tab === 'tournaments') setTournamentFilter('current')
     setActiveTab(tab)
     setNotice('')
   }
