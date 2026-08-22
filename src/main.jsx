@@ -197,6 +197,7 @@ function App() {
   const [leaderboardPlayers, setLeaderboardPlayers] = React.useState([])
   const [registeredUsers, setRegisteredUsers] = React.useState([])
   const [usersError, setUsersError] = React.useState('')
+  const [deletingUserId, setDeletingUserId] = React.useState(null)
   const [usersPage, setUsersPage] = React.useState(1)
   const [leaderboardPage, setLeaderboardPage] = React.useState(1)
   const [passcodePrompt, setPasscodePrompt] = React.useState(null)
@@ -797,6 +798,26 @@ function App() {
     } catch (error) { setDetailError(error.message) } finally { setIsDeletingTournament(false) }
   }
 
+  async function deleteUser(player) {
+    const playerName = displayName(player)
+    if (!window.confirm(`Delete ${playerName}? This permanently removes their account.`)) return
+    const passcode = await requestOrganizerPasscode()
+    if (!passcode) { setUsersError('An organizer passcode is required to delete a user.'); return }
+    setUsersError('')
+    setDeletingUserId(player.id)
+    try {
+      const response = await fetch(`/api/organizer/users/${player.id}`, { method: 'DELETE', headers: { 'x-rally-organizer-passcode': passcode } })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Unable to delete user.')
+      setRegisteredUsers((users) => {
+        const remaining = users.filter((user) => user.id !== player.id)
+        const nextPageCount = Math.max(1, Math.ceil(remaining.length / USERS_PER_PAGE))
+        setUsersPage((page) => Math.min(page, nextPageCount))
+        return remaining
+      })
+    } catch (error) { setUsersError(error.message) } finally { setDeletingUserId(null) }
+  }
+
   async function saveTournamentEdit(event) {
     event.preventDefault()
     if (!editingTournamentId) return
@@ -908,7 +929,7 @@ function App() {
       ) : activeTab === 'messages' && isOrganizer && inviteOnlySignup ? <AccessRequestsPage requests={accessRequests} error={accessRequestsError} isLoading={isLoadingAccessRequests} onGenerate={generateInvite} generatedInvite={generatedInvite} onDismissInvite={() => setGeneratedInvite('')} /> : activeTab === 'users' && isOrganizer ? (
         <section className="page" aria-labelledby="users-title">
           <div className="page-heading"><div><p className="eyebrow">ORGANIZER TOOLS</p><h1 id="users-title">Registered users</h1><p>{registeredUsers.length} players in Rally.</p></div></div>
-          {usersError ? <p className="creation-error">{usersError}</p> : <><div className="users-table">{visibleUsers.map((player) => <div className="user-row" key={player.id}><strong>{displayName(player)}</strong><span>{player.total_points} pts</span></div>)}</div>{registeredUsers.length > USERS_PER_PAGE && <div className="pagination"><button className="secondary-action" disabled={usersPage === 1} onClick={() => setUsersPage((page) => page - 1)}>← Previous</button><span>Page {usersPage} of {usersPageCount}</span><button className="secondary-action" disabled={usersPage === usersPageCount} onClick={() => setUsersPage((page) => page + 1)}>Next →</button></div>}</>}
+          {usersError ? <p className="creation-error">{usersError}</p> : <><div className="users-table">{visibleUsers.map((player) => <div className="user-row" key={player.id}><strong>{displayName(player)}</strong><div className="user-row-actions"><span>{player.total_points} pts</span>{player.username.toLowerCase() !== ORGANIZER_USERNAME && <button className="icon-action icon-action--delete" disabled={deletingUserId === player.id} onClick={() => deleteUser(player)} aria-label={`Delete ${displayName(player)}`} title={`Delete ${displayName(player)}`}><TrashIcon /></button>}</div></div>)}</div>{registeredUsers.length > USERS_PER_PAGE && <div className="pagination"><button className="secondary-action" disabled={usersPage === 1} onClick={() => setUsersPage((page) => page - 1)}>← Previous</button><span>Page {usersPage} of {usersPageCount}</span><button className="secondary-action" disabled={usersPage === usersPageCount} onClick={() => setUsersPage((page) => page + 1)}>Next →</button></div>}</>}
         </section>
       ) : activeTab === 'tournaments' ? (
         <section className="page" aria-labelledby="tournaments-title">

@@ -402,6 +402,26 @@ app.get('/api/organizer/users', requireOrganizer, (_req, res) => {
   res.json({ users })
 })
 
+app.delete('/api/organizer/users/:id', requireOrganizer, (req, res) => {
+  const userId = Number(req.params.id)
+  const user = db.prepare('SELECT id, username, name FROM users WHERE id = ?').get(userId)
+  if (!user) return res.status(404).json({ error: 'User not found.' })
+  if (user.username.toLowerCase() === organizerUsername) return res.status(400).json({ error: 'The organizer account cannot be deleted.' })
+
+  const hasRecordedTournamentData = db.prepare(`SELECT 1 FROM matches WHERE player_one_id = ? OR player_two_id = ?
+    UNION SELECT 1 FROM match_results WHERE winner_user_id = ?
+    UNION SELECT 1 FROM tournament_draw_nodes WHERE player_one_id = ? OR player_two_id = ? OR winner_user_id = ?
+    UNION SELECT 1 FROM tournaments WHERE created_by_user_id = ?
+    UNION SELECT 1 FROM weekly_match_sessions WHERE created_by_user_id = ?
+    UNION SELECT 1 FROM weekly_match_pairings WHERE player_one_id = ? OR player_two_id = ?
+    UNION SELECT 1 FROM signup_invites WHERE created_by_user_id = ?
+    LIMIT 1`).get(userId, userId, userId, userId, userId, userId, userId, userId, userId, userId)
+  if (hasRecordedTournamentData) return res.status(409).json({ error: 'This user has tournament or weekly-match history and cannot be deleted.' })
+
+  db.prepare('DELETE FROM users WHERE id = ?').run(userId)
+  res.json({ deleted: true, id: userId, username: user.username })
+})
+
 // Management requires both the organizer username and a server-side passcode.
 function requireOrganizer(req, res, next) {
   if (!organizerPasscode) {
