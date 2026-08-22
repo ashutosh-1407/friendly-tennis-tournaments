@@ -415,7 +415,7 @@ app.delete('/api/organizer/users/:id', requireOrganizer, (req, res) => {
     UNION SELECT 1 FROM weekly_match_sessions WHERE created_by_user_id = ?
     UNION SELECT 1 FROM weekly_match_pairings WHERE player_one_id = ? OR player_two_id = ?
     UNION SELECT 1 FROM signup_invites WHERE created_by_user_id = ?
-    LIMIT 1`).get(userId, userId, userId, userId, userId, userId, userId, userId, userId, userId)
+    LIMIT 1`).get(userId, userId, userId, userId, userId, userId, userId, userId, userId, userId, userId)
   if (hasRecordedTournamentData) return res.status(409).json({ error: 'This user has tournament or weekly-match history and cannot be deleted.' })
 
   db.prepare('DELETE FROM users WHERE id = ?').run(userId)
