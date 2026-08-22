@@ -9,6 +9,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const organizerUsername = 'ashutosh.1407'
 const organizerPasscode = process.env.ORGANIZER_PASSCODE || ''
 const inviteOnlySignup = process.env.INVITE_ONLY_SIGNUP === 'true'
+const rallyTimeZone = process.env.RALLY_TIME_ZONE || 'America/Chicago'
 const tournamentTiers = {
   rally_250: { label: 'Rally 250 · Court Sprint', points: 250, maxPlayers: 16, days: 1, scoring: 'single_set' },
   rally_500: { label: 'Rally 500 · Weekend Classic', points: 500, maxPlayers: 32, days: 2, scoring: 'best_of_three' },
@@ -471,7 +472,7 @@ app.post('/api/tournaments', requireOrganizer, (req, res) => {
   end.setDate(end.getDate() + tier.days - 1)
   const endDate = end.toISOString().slice(0, 10)
 
-  const today = new Date().toISOString().slice(0, 10)
+  const today = rallyCalendarDate()
   const status = endDate < today ? 'past' : startDate > today ? 'upcoming' : 'current'
   const organizer = db.prepare('SELECT id FROM users WHERE username = ?').get(organizerUsername)
   if (!organizer) return res.status(400).json({ error: 'Open Rally once as the organizer before creating a tournament.' })
@@ -504,7 +505,7 @@ app.patch('/api/tournaments/:id', requireOrganizer, (req, res) => {
   const end = new Date(`${startDate}T12:00:00`)
   end.setDate(end.getDate() + tier.days - 1)
   const endDate = end.toISOString().slice(0, 10)
-  const today = new Date().toISOString().slice(0, 10)
+  const today = rallyCalendarDate()
   const status = endDate < today ? 'past' : startDate > today ? 'upcoming' : 'current'
   const registrationClosesAt = new Date(new Date(`${startDate}T09:00:00`).getTime() - 4 * 24 * 60 * 60 * 1000).toISOString()
   const tournament = db.prepare(`UPDATE tournaments SET name = ?, description = ?, location = ?, starts_at = ?, ends_at = ?, registration_closes_at = ?, status = ?, tournament_tier = ?, max_players = ?, updated_at = CURRENT_TIMESTAMP
@@ -773,16 +774,22 @@ function refreshUserPoints() {
 }
 
 function refreshTournamentStatuses() {
-  const now = new Date()
+  const today = rallyCalendarDate()
   const update = db.prepare('UPDATE tournaments SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status <> ?')
   const tournaments = db.prepare("SELECT id, starts_at, ends_at, status FROM tournaments WHERE status <> 'cancelled'").all()
   for (const tournament of tournaments) {
-    const startsAt = new Date(tournament.starts_at)
-    const endsAt = new Date(tournament.ends_at)
-    if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) continue
-    const status = now >= endsAt ? 'past' : now >= startsAt ? 'current' : 'upcoming'
+    const startDate = String(tournament.starts_at || '').slice(0, 10)
+    const endDate = String(tournament.ends_at || '').slice(0, 10)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) continue
+    const status = today > endDate ? 'past' : today >= startDate ? 'current' : 'upcoming'
     if (tournament.status !== status) update.run(status, tournament.id, status)
   }
+}
+
+function rallyCalendarDate(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: rallyTimeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date)
+  const values = Object.fromEntries(parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]))
+  return `${values.year}-${values.month}-${values.day}`
 }
 
 app.post('/api/matches/:id/result', requireUser, (req, res) => {
