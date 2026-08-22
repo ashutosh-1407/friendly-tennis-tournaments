@@ -31,6 +31,14 @@ function TennisBall() {
   return <span className="tennis-ball" aria-hidden="true"><i /><b /></span>
 }
 
+function EyeIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2.5 12s3.4-5 9.5-5 9.5 5 9.5 5-3.4 5-9.5 5-9.5-5-9.5-5Z" /><circle cx="12" cy="12" r="2.35" /></svg>
+}
+
+function displayName(player) {
+  return player?.name || player?.display_name || player?.username || ''
+}
+
 function registrationHasClosed(tournament) {
   const cutoff = tournament.registration_closes_at ? new Date(tournament.registration_closes_at) : new Date(new Date(tournament.starts_at).getTime() - 4 * 24 * 60 * 60 * 1000)
   return Date.now() >= cutoff.getTime()
@@ -72,7 +80,7 @@ function TournamentDraw({ draw, isOrganizer, tournamentStatus, drawActionPending
   return <div className="draw-panel">
     {isOrganizer && tournamentStatus !== 'past' && <div className="draw-tools">{matches.length ? <button className="undo-draw" disabled={drawActionPending === 'reset'} onClick={() => onManage('reset')}>{drawActionPending === 'reset' ? 'Undoing…' : 'Undo draw'}</button> : <button className="secondary-action" disabled={drawActionPending === 'generate'} onClick={() => onManage('generate')}>{drawActionPending === 'generate' ? 'Generating…' : 'Generate draw'}</button>}<button className={draw.visible ? 'secondary-action' : 'primary-action'} disabled={drawActionPending === 'publish' || drawActionPending === 'unpublish' || !matches.length} onClick={() => onManage(draw.visible ? 'unpublish' : 'publish')} title={!matches.length ? 'Generate a draw first' : undefined}>{drawActionPending === 'publish' ? 'Publishing…' : drawActionPending === 'unpublish' ? 'Unpublishing…' : draw.visible ? 'Unpublish draw' : 'Publish draw'}</button></div>}
     {isPreview && <div className="draw-visibility">Organizer preview — players cannot see this bracket yet.</div>}
-    {draw.seeds?.length > 0 && <div className="draw-seeds"><span>Seeds</span>{draw.seeds.map((player) => <b key={player.id}>#{player.seed} {player.username}</b>)}</div>}
+    {draw.seeds?.length > 0 && <div className="draw-seeds"><span>Seeds</span>{draw.seeds.map((player) => <b key={player.id}>#{player.seed} {displayName(player)}</b>)}</div>}
     {!matches.length ? <div className="draw-locked"><span>◌</span><h2>Bracket not generated yet</h2><p>The organizer will create the bracket once registrations are in.</p></div> : <div className="bracket-scroller"><div className="bracket-board" style={{ '--round-count': draw.rounds.length }}>{draw.rounds.map((round, roundIndex) => {
       const matchCount = Math.max(1, Math.ceil(openingMatches.length / (2 ** roundIndex)))
       const roundMatches = matches.filter((match) => match.round_name === round).sort((left, right) => left.match_order - right.match_order)
@@ -83,7 +91,7 @@ function TournamentDraw({ draw, isOrganizer, tournamentStatus, drawActionPending
         const secondPlaceholder = roundIndex === 0 ? null : priorRoundMatches[matchIndex * 2 + 1]?.winner_name || `Winner of ${roundLabel(draw.rounds[roundIndex - 1])} ${matchIndex * 2 + 2}`
         const canEnterScore = tournamentStatus === 'current' && match && (match.status !== 'completed' || isOrganizer) && (isOrganizer || [match.player_one_name, match.player_two_name].some((player) => player.toLowerCase() === username.toLowerCase()))
         const canShowWinner = ['current', 'past'].includes(tournamentStatus) && Boolean(match?.winner_user_id)
-        return <div className={`bracket-match ${match ? '' : 'bracket-match--pending'} ${canEnterScore ? 'bracket-match--editable' : ''}`} key={match?.id || matchIndex} role={canEnterScore ? 'button' : undefined} tabIndex={canEnterScore ? 0 : undefined} onClick={() => canEnterScore && onEnterScore(match)} onKeyDown={(event) => canEnterScore && event.key === 'Enter' && onEnterScore(match)} title={canEnterScore ? 'Enter match score' : undefined}><div className={`bracket-player ${canShowWinner && match.winner_user_id === match.player_one_id ? 'bracket-player--winner' : ''}`}><span>{match ? <>{match.player_one_name}{match.player_one_seed && <sup className="draw-seed-number">[{match.player_one_seed}]</sup>}</> : firstPlaceholder}</span><b>{match?.player_one_score || '—'}</b></div><div className={`bracket-player ${canShowWinner && match.winner_user_id === match.player_two_id ? 'bracket-player--winner' : ''}`}><span>{match ? <>{match.player_two_name}{match.player_two_seed && <sup className="draw-seed-number">[{match.player_two_seed}]</sup>}</> : secondPlaceholder}</span><b>{match?.player_two_score || '—'}</b></div>{isOrganizer && tournamentStatus === 'current' && match && match.status !== 'completed' && <div className="bye-controls"><button onClick={(event) => { event.stopPropagation(); onAwardBye(match, match.player_one_id) }}>Bye → {match.player_one_name}</button><button onClick={(event) => { event.stopPropagation(); onAwardBye(match, match.player_two_id) }}>Bye → {match.player_two_name}</button></div>}</div>
+        return <div className={`bracket-match ${match ? '' : 'bracket-match--pending'} ${canEnterScore ? 'bracket-match--editable' : ''}`} key={match?.id || matchIndex} role={canEnterScore ? 'button' : undefined} tabIndex={canEnterScore ? 0 : undefined} onClick={() => canEnterScore && onEnterScore(match)} onKeyDown={(event) => canEnterScore && event.key === 'Enter' && onEnterScore(match)} title={canEnterScore ? 'Enter match score' : undefined}><div className={`bracket-player ${canShowWinner && match.winner_user_id === match.player_one_id ? 'bracket-player--winner' : ''}`}><span>{match ? <>{match.player_one_display_name || match.player_one_name}{match.player_one_seed && <sup className="draw-seed-number">[{match.player_one_seed}]</sup>}</> : firstPlaceholder}</span><b>{match?.player_one_score || '—'}</b></div><div className={`bracket-player ${canShowWinner && match.winner_user_id === match.player_two_id ? 'bracket-player--winner' : ''}`}><span>{match ? <>{match.player_two_display_name || match.player_two_name}{match.player_two_seed && <sup className="draw-seed-number">[{match.player_two_seed}]</sup>}</> : secondPlaceholder}</span><b>{match?.player_two_score || '—'}</b></div>{isOrganizer && tournamentStatus === 'current' && match && match.status !== 'completed' && <div className="bye-controls"><button onClick={(event) => { event.stopPropagation(); onAwardBye(match, match.player_one_id) }}>Bye → {match.player_one_display_name || match.player_one_name}</button><button onClick={(event) => { event.stopPropagation(); onAwardBye(match, match.player_two_id) }}>Bye → {match.player_two_display_name || match.player_two_name}</button></div>}</div>
       })}</div></section>
     })}</div></div>}
   </div>
@@ -95,8 +103,8 @@ function WeeklyMatchesPage({ sessions, isLoading, actionPending, onRegister, onW
   return <section className="page weekly-page" aria-labelledby="weekly-matches-title">
     <div className="page-heading"><div><p className="eyebrow">CASUAL COURT TIME</p><h1 id="weekly-matches-title">Weekly matches</h1><p>Join a session, then get a random partner or opponent shortly before play.</p></div><button className="primary-action" onClick={onCreate}>+ Create weekly match</button></div>
     {notice && <div className="notice" role="status">{notice}</div>}{error && <div className="registration-error" role="alert">{error}</div>}
-    <div className="weekly-list">{isLoading ? <p>Loading weekly matches…</p> : sessions.length ? sessions.map((session) => { const startsAt = new Date(session.starts_at); const canRegister = registrationIsOpen(session); const pairedPlayerIds = new Set(session.pairings.flatMap((pairing) => [pairing.player_one_id, pairing.player_two_id])); const sittingOut = session.draw_generated_at ? session.registrations.filter((player) => !pairedPlayerIds.has(player.id)).map((player) => player.username) : []; return <article className="weekly-card" key={session.id}><div className="weekly-card-head"><div><p className="card-date">{startsAt.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })} · {startsAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</p><h2>Weekly court session</h2>{(session.court_name || session.court_numbers) && <p className="weekly-court">{session.court_name}{session.court_name && session.court_numbers && ' · '}{session.court_numbers && `Courts ${session.court_numbers}`}</p>}<p className="weekly-capacity">{session.registered_count} registered · first {session.required_players} play</p></div><div className="weekly-card-actions">{canRegister && <button className="edit-weekly-action" onClick={() => onEdit(session)}>Edit</button>}{isOrganizer && <button className="delete-weekly-action" disabled={actionPending === `delete-${session.id}`} onClick={() => onDelete(session.id)}>{actionPending === `delete-${session.id}` ? 'Deleting…' : 'Delete session'}</button>}{session.registered ? (canRegister ? <button className="secondary-action withdraw-action" disabled={actionPending === `withdraw-${session.id}`} onClick={() => onWithdraw(session.id)}>{actionPending === `withdraw-${session.id}` ? 'Withdrawing…' : 'Withdraw'}</button> : <span className="registered">Registered</span>) : (canRegister ? <button className="secondary-action" disabled={actionPending === `register-${session.id}`} onClick={() => onRegister(session.id)}>{actionPending === `register-${session.id}` ? 'Registering…' : 'Register'}</button> : <span className="registration-closed">Registration closed one hour before play</span>)}</div></div>
-      {session.registrations.length > 0 && <div className="weekly-players"><strong>Registered players</strong><div>{session.registrations.map((player, index) => <span key={player.id}><b>{index + 1}</b>@{player.username}</span>)}</div></div>}{!session.draw_generated_at ? <div className="weekly-pairing-state">{generationIsOpen(session) ? <button className="primary-action" disabled={actionPending === `generate-${session.id}`} onClick={() => onGenerate(session.id)}>{actionPending === `generate-${session.id}` ? 'Generating…' : 'Generate random pairings'}</button> : <span>Pairings can be generated one hour before play.</span>}</div> : <div className="weekly-pairings"><strong>Random pairings</strong>{session.pairings.length ? <div>{session.pairings.map((pairing) => <p key={pairing.pairing_order}>Court {pairing.pairing_order}: <b>{pairing.player_one_name}</b> <span>vs</span> <b>{pairing.player_two_name}</b></p>)}</div> : <p>Not enough players for a pairing yet.</p>}{sittingOut.length > 0 && <small>No pairing for: {sittingOut.join(', ')}.</small>}</div>}</article> }) : <div className="empty-state"><div className="court-mark"><TennisBall /></div><h2>No weekly matches yet</h2><p>Create the first session for your group.</p></div>}</div>
+    <div className="weekly-list">{isLoading ? <p>Loading weekly matches…</p> : sessions.length ? sessions.map((session) => { const startsAt = new Date(session.starts_at); const canRegister = registrationIsOpen(session); const pairedPlayerIds = new Set(session.pairings.flatMap((pairing) => [pairing.player_one_id, pairing.player_two_id])); const sittingOut = session.draw_generated_at ? session.registrations.filter((player) => !pairedPlayerIds.has(player.id)).map(displayName) : []; return <article className="weekly-card" key={session.id}><div className="weekly-card-head"><div><p className="card-date">{startsAt.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })} · {startsAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</p><h2>Weekly court session</h2>{(session.court_name || session.court_numbers) && <p className="weekly-court">{session.court_name}{session.court_name && session.court_numbers && ' · '}{session.court_numbers && `Courts ${session.court_numbers}`}</p>}<p className="weekly-capacity">{session.registered_count} registered · first {session.required_players} play</p></div><div className="weekly-card-actions">{canRegister && <button className="edit-weekly-action" onClick={() => onEdit(session)}>Edit</button>}{isOrganizer && <button className="delete-weekly-action" disabled={actionPending === `delete-${session.id}`} onClick={() => onDelete(session.id)}>{actionPending === `delete-${session.id}` ? 'Deleting…' : 'Delete session'}</button>}{session.registered ? (canRegister ? <button className="secondary-action withdraw-action" disabled={actionPending === `withdraw-${session.id}`} onClick={() => onWithdraw(session.id)}>{actionPending === `withdraw-${session.id}` ? 'Withdrawing…' : 'Withdraw'}</button> : <span className="registered">Registered</span>) : (canRegister ? <button className="secondary-action" disabled={actionPending === `register-${session.id}`} onClick={() => onRegister(session.id)}>{actionPending === `register-${session.id}` ? 'Registering…' : 'Register'}</button> : <span className="registration-closed">Registration closed one hour before play</span>)}</div></div>
+      {session.registrations.length > 0 && <div className="weekly-players"><strong>Registered players</strong><div>{session.registrations.map((player, index) => <span key={player.id}><b>{index + 1}</b>{displayName(player)}</span>)}</div></div>}{!session.draw_generated_at ? <div className="weekly-pairing-state">{generationIsOpen(session) ? <button className="primary-action" disabled={actionPending === `generate-${session.id}`} onClick={() => onGenerate(session.id)}>{actionPending === `generate-${session.id}` ? 'Generating…' : 'Generate random pairings'}</button> : <span>Pairings can be generated one hour before play.</span>}</div> : <div className="weekly-pairings"><strong>Random pairings</strong>{session.pairings.length ? <div>{session.pairings.map((pairing) => <p key={pairing.pairing_order}>Court {pairing.pairing_order}: <b>{pairing.player_one_display_name || pairing.player_one_name}</b> <span>vs</span> <b>{pairing.player_two_display_name || pairing.player_two_name}</b></p>)}</div> : <p>Not enough players for a pairing yet.</p>}{sittingOut.length > 0 && <small>No pairing for: {sittingOut.join(', ')}.</small>}</div>}</article> }) : <div className="empty-state"><div className="court-mark"><TennisBall /></div><h2>No weekly matches yet</h2><p>Create the first session for your group.</p></div>}</div>
   </section>
 }
 
@@ -116,10 +124,13 @@ function ScoreEntryModal({ match, onClose, onSave, isSaving, error, isSingleSet 
 function App() {
   const savedUsername = localStorage.getItem(USERNAME_KEY) || ''
   const [username, setUsername] = React.useState('')
+  const [name, setName] = React.useState('')
   const [userId, setUserId] = React.useState(null)
   const [draftName, setDraftName] = React.useState(savedUsername)
   const [isCheckingSession, setIsCheckingSession] = React.useState(true)
   const [draftPassword, setDraftPassword] = React.useState('')
+  const [draftProfileName, setDraftProfileName] = React.useState('')
+  const [isPasswordVisible, setIsPasswordVisible] = React.useState(false)
   const [authMode, setAuthMode] = React.useState('signin')
   const [activeTab, setActiveTab] = React.useState(() => ['weekly', 'tournaments', 'leaderboard'].includes(localStorage.getItem(ACTIVE_TAB_KEY)) ? localStorage.getItem(ACTIVE_TAB_KEY) : 'tournaments')
   const [tournamentFilter, setTournamentFilter] = React.useState('upcoming')
@@ -129,6 +140,7 @@ function App() {
   const isOrganizer = username.toLowerCase() === ORGANIZER_USERNAME
   const [organizerPasscode, setOrganizerPasscode] = React.useState(sessionStorage.getItem(ORGANIZER_PASSCODE_KEY) || '')
   const [tournamentDraft, setTournamentDraft] = React.useState({ name: '', startDate: '', tournamentTier: 'rally_500', location: '', description: '' })
+  const [editingTournamentId, setEditingTournamentId] = React.useState(null)
   const [creationError, setCreationError] = React.useState('')
   const [isCreating, setIsCreating] = React.useState(false)
   const [tournaments, setTournaments] = React.useState([])
@@ -173,6 +185,7 @@ function App() {
       .then((data) => {
         if (!data.user) return
         setUsername(data.user.username)
+        setName(data.user.name || '')
         setUserId(data.user.id)
         setDraftName(data.user.username)
         localStorage.setItem(USERNAME_KEY, data.user.username)
@@ -195,13 +208,14 @@ function App() {
       const response = await fetch(`/api/auth/${authMode}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: cleanName, password: draftPassword }),
+        body: JSON.stringify({ username: cleanName, password: draftPassword, name: authMode === 'signup' ? draftProfileName : '' }),
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Unable to save your username.')
       localStorage.setItem(USERNAME_KEY, data.user.username)
       localStorage.setItem(USER_ID_KEY, data.user.id)
       setUsername(data.user.username)
+      setName(data.user.name || '')
       setUserId(data.user.id)
       setDraftPassword('')
     } catch (error) {
@@ -229,6 +243,7 @@ function App() {
       localStorage.setItem(USERNAME_KEY, data.user.username)
       localStorage.setItem(USER_ID_KEY, data.user.id)
       setUsername(data.user.username)
+      setName(data.user.name || '')
       setUserId(data.user.id)
       setDraftPassword('')
     } catch (error) {
@@ -245,6 +260,7 @@ function App() {
     sessionStorage.removeItem(ORGANIZER_PASSCODE_KEY)
     setDraftName('')
     setUsername('')
+    setName('')
     setUserId(null)
     setOrganizerPasscode('')
     setActiveTab('tournaments')
@@ -654,6 +670,38 @@ function App() {
     }
   }
 
+  function openTournamentEdit(tournament) {
+    setCreationError('')
+    setEditingTournamentId(tournament.id)
+    setTournamentDraft({ name: tournament.name, startDate: tournament.starts_at.slice(0, 10), tournamentTier: tournament.tournament_tier || 'rally_500', location: tournament.location || '', description: tournament.description || '' })
+    setActiveTab('edit-tournament')
+  }
+
+  async function saveTournamentEdit(event) {
+    event.preventDefault()
+    if (!editingTournamentId) return
+    const passcode = requestOrganizerPasscode()
+    if (!passcode) {
+      setCreationError('An organizer passcode is required to edit a tournament.')
+      return
+    }
+    setCreationError('')
+    setIsCreating(true)
+    try {
+      const response = await fetch(`/api/tournaments/${editingTournamentId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'x-rally-organizer-passcode': passcode }, body: JSON.stringify(tournamentDraft) })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Unable to update tournament.')
+      setEditingTournamentId(null)
+      setActiveTab('tournaments')
+      setTournamentFilter(data.tournament.status)
+      setNotice(`“${data.tournament.name}” has been updated.`)
+    } catch (error) {
+      setCreationError(error.message)
+    } finally {
+      setIsCreating(false)
+    }
+  }
+
   const usersPageCount = Math.max(1, Math.ceil(registeredUsers.length / USERS_PER_PAGE))
   const visibleUsers = registeredUsers.slice((usersPage - 1) * USERS_PER_PAGE, usersPage * USERS_PER_PAGE)
   const leaderboardPageCount = Math.max(1, Math.ceil(leaderboardPlayers.length / USERS_PER_PAGE))
@@ -678,9 +726,11 @@ function App() {
               <span aria-hidden="true">@</span>
               <input id="username" value={draftName} onChange={(event) => setDraftName(event.target.value)} placeholder="e.g. topspin_taylor" autoComplete="username" maxLength="32" autoFocus />
             </div>
+            {authMode === 'signup' && <><label htmlFor="profile-name" className="password-label">Name <span className="optional">(optional)</span></label><div className="input-row"><input id="profile-name" value={draftProfileName} onChange={(event) => setDraftProfileName(event.target.value)} placeholder="e.g. Taylor Smith" autoComplete="name" maxLength="80" /></div></>}
             <label htmlFor="password" className="password-label">Password</label>
-            <div className="input-row">
-              <input id="password" type="password" value={draftPassword} onChange={(event) => setDraftPassword(event.target.value)} placeholder="At least 6 characters" autoComplete={authMode === 'signin' ? 'current-password' : 'new-password'} minLength="6" maxLength="128" />
+            <div className="input-row password-row">
+              <input id="password" type={isPasswordVisible ? 'text' : 'password'} value={draftPassword} onChange={(event) => setDraftPassword(event.target.value)} placeholder="At least 6 characters" autoComplete={authMode === 'signin' ? 'current-password' : 'new-password'} minLength="6" maxLength="128" />
+              <button type="button" className="password-toggle" onClick={() => setIsPasswordVisible((visible) => !visible)} aria-label={isPasswordVisible ? 'Hide password' : 'Show password'} title={isPasswordVisible ? 'Hide password' : 'Show password'}><EyeIcon /></button>
             </div>
             <button type="submit" disabled={!draftName.trim() || !draftPassword || isSavingUsername}>{isSavingUsername ? 'Please wait…' : authMode === 'signin' ? <>Sign in <span aria-hidden="true">→</span></> : <>Create account <span aria-hidden="true">→</span></>}</button>
             {authMode === 'signin' && draftName.trim().toLowerCase() === ORGANIZER_USERNAME && <button type="button" className="organizer-reset" disabled={!draftPassword || isSavingUsername} onClick={resetOrganizerPassword}>Reset organizer password</button>}
@@ -699,37 +749,37 @@ function App() {
         <div className="brand"><TennisBall /><span>rally</span></div>
         <nav aria-label="Main navigation">
           <button className={['weekly', 'weekly-create', 'weekly-edit'].includes(activeTab) ? 'active' : ''} onClick={() => selectTab('weekly')}>Weekly Matches</button>
-          <button className={activeTab === 'tournaments' ? 'active' : ''} onClick={() => selectTab('tournaments')}>Tournaments</button>
+          <button className={['tournaments', 'create', 'edit-tournament'].includes(activeTab) ? 'active' : ''} onClick={() => selectTab('tournaments')}>Tournaments</button>
           <button className={activeTab === 'leaderboard' ? 'active' : ''} onClick={() => selectTab('leaderboard')}>Leaderboard</button>
           {isOrganizer && <button className={activeTab === 'users' ? 'active' : ''} onClick={() => selectTab('users')}>Users</button>}
         </nav>
-        <button className="profile" onClick={changeUser} title="Use a different username"><span className="avatar">{username.slice(0, 1).toUpperCase()}</span><span>@{username}</span><span className="switch">Switch</span></button>
+        <button className="profile" onClick={changeUser} title="Use a different username"><span className="avatar">{(name || username).slice(0, 1).toUpperCase()}</span><span>{name || `@${username}`}</span><span className="switch">Switch</span></button>
       </header>
 
       {activeTab === 'weekly' ? <WeeklyMatchesPage sessions={weeklySessions} isLoading={isLoadingWeekly} actionPending={weeklyActionPending} onRegister={(sessionId) => updateWeeklyRegistration(sessionId, 'POST')} onWithdraw={(sessionId) => updateWeeklyRegistration(sessionId, 'DELETE')} onGenerate={generateWeeklyPairings} error={weeklyError} notice={notice} onCreate={() => { setWeeklyError(''); setActiveTab('weekly-create') }} onEdit={openWeeklyMatchEdit} isOrganizer={isOrganizer} onDelete={deleteWeeklyMatch} /> : activeTab === 'weekly-create' ? <WeeklyMatchCreatePage draft={weeklyDraft} onDraftChange={updateWeeklyDraft} onCreate={createWeeklyMatch} isCreating={isCreatingWeekly} error={weeklyError} onBack={() => selectTab('weekly')} /> : activeTab === 'weekly-edit' ? <WeeklyMatchCreatePage draft={weeklyDraft} onDraftChange={updateWeeklyDraft} onCreate={saveWeeklyMatch} isCreating={isCreatingWeekly} error={weeklyError} onBack={() => selectTab('weekly')} isEditing /> : activeTab === 'detail' ? (
         <section className="page detail-page" aria-labelledby="tournament-detail-title">
           <button className="back-button" onClick={() => selectTab('tournaments')}>← Back to tournaments</button>
           {detailError && <p className="creation-error" role="alert">{detailError}</p>}
-          {!tournamentDetail ? <p className="detail-loading">Loading tournament…</p> : <><div className="detail-heading"><p className="eyebrow">{new Date(tournamentDetail.tournament.starts_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })} · {TOURNAMENT_TIERS[tournamentDetail.tournament.tournament_tier]?.label || 'Rally 500 · Weekend Classic'} · {tournamentDetail.tournament.location || 'Location to be announced'}</p><h1 id="tournament-detail-title">{tournamentDetail.tournament.name}</h1>{tournamentDetail.tournament.description && <p>{tournamentDetail.tournament.description}</p>}</div><div className="detail-tabs"><button className={detailTab === 'players' ? 'active' : ''} onClick={() => setDetailTab('players')}>Players <span>{tournamentDetail.players.length}</span></button><button className={detailTab === 'draw' ? 'active' : ''} onClick={() => setDetailTab('draw')}>Draw</button></div>{detailTab === 'players' ? <div className="player-panel">{tournamentDetail.players.length ? tournamentDetail.players.map((player, index) => <div className="player-row" key={player.id}><span className="player-number">{index + 1}</span><span className="mini-avatar">{player.username[0].toUpperCase()}</span><strong>@{player.username}</strong>{player.seed && <span className="seed">Seed {player.seed}</span>}</div>) : <div className="empty-detail"><TennisBall /><p>No players registered yet.</p></div>}</div> : <TournamentDraw draw={tournamentDetail.draw} isOrganizer={isOrganizer} tournamentStatus={tournamentDetail.tournament.status} drawActionPending={drawActionPending} onManage={manageDraw} username={username} onEnterScore={openScore} onAwardBye={awardBye} />}</>}
+          {!tournamentDetail ? <p className="detail-loading">Loading tournament…</p> : <><div className="detail-heading"><p className="eyebrow">{new Date(tournamentDetail.tournament.starts_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })} · {TOURNAMENT_TIERS[tournamentDetail.tournament.tournament_tier]?.label || 'Rally 500 · Weekend Classic'} · {tournamentDetail.tournament.location || 'Location to be announced'}</p><div className="detail-title-row"><h1 id="tournament-detail-title">{tournamentDetail.tournament.name}</h1>{isOrganizer && tournamentDetail.tournament.status === 'upcoming' && <button className="edit-tournament-action" onClick={() => openTournamentEdit(tournamentDetail.tournament)}>Edit tournament</button>}</div>{tournamentDetail.tournament.description && <p>{tournamentDetail.tournament.description}</p>}</div><div className="detail-tabs"><button className={detailTab === 'players' ? 'active' : ''} onClick={() => setDetailTab('players')}>Players <span>{tournamentDetail.players.length}</span></button><button className={detailTab === 'draw' ? 'active' : ''} onClick={() => setDetailTab('draw')}>Draw</button></div>{detailTab === 'players' ? <div className="player-panel">{tournamentDetail.players.length ? tournamentDetail.players.map((player, index) => <div className="player-row" key={player.id}><span className="player-number">{index + 1}</span><span className="mini-avatar">{displayName(player)[0].toUpperCase()}</span><strong>{displayName(player)}</strong>{player.seed && <span className="seed">Seed {player.seed}</span>}</div>) : <div className="empty-detail"><TennisBall /><p>No players registered yet.</p></div>}</div> : <TournamentDraw draw={tournamentDetail.draw} isOrganizer={isOrganizer} tournamentStatus={tournamentDetail.tournament.status} drawActionPending={drawActionPending} onManage={manageDraw} username={username} onEnterScore={openScore} onAwardBye={awardBye} />}</>}
         </section>
-      ) : activeTab === 'create' && isOrganizer ? (
+      ) : ['create', 'edit-tournament'].includes(activeTab) && isOrganizer ? (
         <section className="page create-page" aria-labelledby="create-title">
           <button className="back-button" onClick={() => selectTab('tournaments')}>← Back to tournaments</button>
-          <div className="create-heading"><p className="eyebrow">ORGANIZER TOOLS</p><h1 id="create-title">Create a tournament</h1><p>Set the basics now. Registration and match setup come next.</p></div>
-          <form className="tournament-form" onSubmit={createTournament}>
+          <div className="create-heading"><p className="eyebrow">ORGANIZER TOOLS</p><h1 id="create-title">{activeTab === 'edit-tournament' ? 'Edit tournament' : 'Create a tournament'}</h1><p>{activeTab === 'edit-tournament' ? 'Update the tournament details below.' : 'Set the basics now. Registration and match setup come next.'}</p></div>
+          <form className="tournament-form" onSubmit={activeTab === 'edit-tournament' ? saveTournamentEdit : createTournament}>
             <label><span className="form-label-row">Tournament name<button type="button" className="random-name-button" onClick={fillRandomTournamentName}>↻ Random name</button></span><input name="name" value={tournamentDraft.name} onChange={updateTournamentDraft} placeholder="e.g. Sunday Rally Open" maxLength="100" required autoFocus /></label>
             <label>Tournament tier<select name="tournamentTier" value={tournamentDraft.tournamentTier} onChange={updateTournamentDraft}>{Object.entries(TOURNAMENT_TIERS).map(([key, tier]) => <option key={key} value={key}>{tier.label} — {tier.points} pts</option>)}</select><span className="tier-description">{TOURNAMENT_TIERS[tournamentDraft.tournamentTier].days} day · {TOURNAMENT_TIERS[tournamentDraft.tournamentTier].scoring} · Up to {TOURNAMENT_TIERS[tournamentDraft.tournamentTier].maxPlayers} players</span></label>
             <div className="form-grid"><label>Start date<input type="date" name="startDate" value={tournamentDraft.startDate} onChange={updateTournamentDraft} required /></label><label>End date <span className="optional">(set by tier)</span><input type="date" value={tournamentEndDate(tournamentDraft.startDate, tournamentDraft.tournamentTier)} readOnly /></label></div>
             <label>Location <span className="optional">(optional)</span><input name="location" value={tournamentDraft.location} onChange={updateTournamentDraft} placeholder="e.g. Riverside Tennis Center" maxLength="120" /></label>
             <label>Note for players <span className="optional">(optional)</span><textarea name="description" value={tournamentDraft.description} onChange={updateTournamentDraft} placeholder="Share any useful details: start time, court number, or format." maxLength="500" rows="4" /></label>
             {creationError && <p className="creation-error" role="alert">{creationError}</p>}
-            <div className="form-actions"><button type="button" className="cancel-button" onClick={() => selectTab('tournaments')}>Cancel</button><button type="submit" className="primary-action" disabled={isCreating}>{isCreating ? 'Creating…' : 'Create tournament'}</button></div>
+            <div className="form-actions"><button type="button" className="cancel-button" onClick={() => selectTab('tournaments')}>Cancel</button><button type="submit" className="primary-action" disabled={isCreating}>{isCreating ? 'Saving…' : activeTab === 'edit-tournament' ? 'Save changes' : 'Create tournament'}</button></div>
           </form>
         </section>
       ) : activeTab === 'users' && isOrganizer ? (
         <section className="page" aria-labelledby="users-title">
           <div className="page-heading"><div><p className="eyebrow">ORGANIZER TOOLS</p><h1 id="users-title">Registered users</h1><p>{registeredUsers.length} players in Rally.</p></div></div>
-          {usersError ? <p className="creation-error">{usersError}</p> : <><div className="users-table">{visibleUsers.map((player) => <div className="user-row" key={player.id}><strong>@{player.username}</strong><span>{player.total_points} pts</span></div>)}</div>{registeredUsers.length > USERS_PER_PAGE && <div className="pagination"><button className="secondary-action" disabled={usersPage === 1} onClick={() => setUsersPage((page) => page - 1)}>← Previous</button><span>Page {usersPage} of {usersPageCount}</span><button className="secondary-action" disabled={usersPage === usersPageCount} onClick={() => setUsersPage((page) => page + 1)}>Next →</button></div>}</>}
+          {usersError ? <p className="creation-error">{usersError}</p> : <><div className="users-table">{visibleUsers.map((player) => <div className="user-row" key={player.id}><strong>{displayName(player)}</strong><span>{player.total_points} pts</span></div>)}</div>{registeredUsers.length > USERS_PER_PAGE && <div className="pagination"><button className="secondary-action" disabled={usersPage === 1} onClick={() => setUsersPage((page) => page - 1)}>← Previous</button><span>Page {usersPage} of {usersPageCount}</span><button className="secondary-action" disabled={usersPage === usersPageCount} onClick={() => setUsersPage((page) => page + 1)}>Next →</button></div>}</>}
         </section>
       ) : activeTab === 'tournaments' ? (
         <section className="page" aria-labelledby="tournaments-title">
@@ -750,7 +800,7 @@ function App() {
         <section className="page leaderboard" aria-labelledby="leaderboard-title">
           <div className="page-heading"><div><p className="eyebrow">LOCAL RANKINGS</p><h1 id="leaderboard-title">Leaderboard</h1><p>Win matches to earn tournament points.</p></div></div>
           <div className="rating-note"><span>✦</span><div><strong>Win 250 or 500 points, depending on the tournament tier.</strong><p>Later-round wins are worth more; points update as scores are recorded.</p></div></div>
-          {leaderboardPlayers.length ? <><div className="leaderboard-table">{visibleLeaderboardPlayers.map((player) => <div className="leaderboard-row" key={player.user_id}><span className="leaderboard-rank">{player.rank}</span><span className="mini-avatar">{player.username[0].toUpperCase()}</span><strong>@{player.username}</strong><span className="leaderboard-points">{player.total_points} pts</span></div>)}</div>{leaderboardPlayers.length > USERS_PER_PAGE && <div className="pagination"><button className="secondary-action" disabled={leaderboardPage === 1} onClick={() => setLeaderboardPage((page) => page - 1)}>← Previous</button><span>Page {leaderboardPage} of {leaderboardPageCount}</span><button className="secondary-action" disabled={leaderboardPage === leaderboardPageCount} onClick={() => setLeaderboardPage((page) => page + 1)}>Next →</button></div>}</> : <div className="empty-state leaderboard-empty"><div className="trophy">♜</div><h2>The board is waiting</h2><p>Record the first result to begin earning points.</p></div>}
+          {leaderboardPlayers.length ? <><div className="leaderboard-table">{visibleLeaderboardPlayers.map((player) => <div className="leaderboard-row" key={player.user_id}><span className="leaderboard-rank">{player.rank}</span><span className="mini-avatar">{displayName(player)[0].toUpperCase()}</span><strong>{displayName(player)}</strong><span className="leaderboard-points">{player.total_points} pts</span></div>)}</div>{leaderboardPlayers.length > USERS_PER_PAGE && <div className="pagination"><button className="secondary-action" disabled={leaderboardPage === 1} onClick={() => setLeaderboardPage((page) => page - 1)}>← Previous</button><span>Page {leaderboardPage} of {leaderboardPageCount}</span><button className="secondary-action" disabled={leaderboardPage === leaderboardPageCount} onClick={() => setLeaderboardPage((page) => page + 1)}>Next →</button></div>}</> : <div className="empty-state leaderboard-empty"><div className="trophy">♜</div><h2>The board is waiting</h2><p>Record the first result to begin earning points.</p></div>}
         </section>
       )}
       {scoreMatch && <ScoreEntryModal match={scoreMatch} onClose={() => setScoreMatch(null)} onSave={saveScore} isSaving={isSavingScore} error={scoreError} isSingleSet={tournamentDetail?.tournament?.tournament_tier === 'rally_250'} />}

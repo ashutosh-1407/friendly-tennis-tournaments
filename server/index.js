@@ -35,6 +35,9 @@ if (!db.prepare("SELECT 1 FROM pragma_table_info('tournaments') WHERE name = 'dr
 if (!db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name = 'password_hash'").get()) {
   db.exec('ALTER TABLE users ADD COLUMN password_hash TEXT')
 }
+if (!db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name = 'name'").get()) {
+  db.exec('ALTER TABLE users ADD COLUMN name TEXT')
+}
 if (!db.prepare("SELECT 1 FROM pragma_table_info('tournaments') WHERE name = 'tournament_tier'").get()) {
   db.exec("ALTER TABLE tournaments ADD COLUMN tournament_tier TEXT NOT NULL DEFAULT 'rally_500' CHECK (tournament_tier IN ('rally_250', 'rally_500'))")
 }
@@ -136,7 +139,7 @@ function startSession(res, user) {
 app.use((req, _res, next) => {
   const token = readCookie(req, 'rally_session')
   if (token) {
-    req.authUser = db.prepare('SELECT u.id, u.username, u.total_points FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ?').get(token, new Date().toISOString()) || null
+    req.authUser = db.prepare('SELECT u.id, u.username, u.name, u.total_points FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ?').get(token, new Date().toISOString()) || null
   }
   next()
 })
@@ -172,18 +175,19 @@ function organizerPasscodeMatches(req) {
 
 app.post('/api/auth/signup', (req, res) => {
   const username = String(req.body?.username || '').trim()
+  const name = String(req.body?.name || '').trim().slice(0, 80) || null
   const password = String(req.body?.password || '')
   const error = validateCredentials(username, password)
   if (error) return res.status(400).json({ error })
-  const existing = db.prepare('SELECT id, username, total_points, password_hash FROM users WHERE username = ?').get(username)
+  const existing = db.prepare('SELECT id, username, name, total_points, password_hash FROM users WHERE username = ?').get(username)
   if (existing?.password_hash) return res.status(409).json({ error: 'That username is already taken. Sign in instead.' })
   if (existing) {
-    db.prepare('UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(hashPassword(password), existing.id)
-    const user = { id: existing.id, username: existing.username, total_points: existing.total_points }
+    db.prepare('UPDATE users SET password_hash = ?, name = COALESCE(?, name), updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(hashPassword(password), name, existing.id)
+    const user = { id: existing.id, username: existing.username, name: name || existing.name, total_points: existing.total_points }
     startSession(res, user)
     return res.json({ user })
   }
-  const user = db.prepare('INSERT INTO users (username, password_hash) VALUES (?, ?) RETURNING id, username, total_points').get(username, hashPassword(password))
+  const user = db.prepare('INSERT INTO users (username, name, password_hash) VALUES (?, ?, ?) RETURNING id, username, name, total_points').get(username, name, hashPassword(password))
   startSession(res, user)
   res.status(201).json({ user })
 })
@@ -193,11 +197,11 @@ app.post('/api/auth/signin', (req, res) => {
   const password = String(req.body?.password || '')
   const error = validateCredentials(username, password)
   if (error) return res.status(400).json({ error })
-  const user = db.prepare('SELECT id, username, total_points, password_hash FROM users WHERE username = ?').get(username)
+  const user = db.prepare('SELECT id, username, name, total_points, password_hash FROM users WHERE username = ?').get(username)
   if (!user) return res.status(404).json({ error: 'We could not find that username. Sign up instead.' })
   if (!user.password_hash) return res.status(403).json({ error: 'This is an old username-only profile and cannot sign in. Please create a new account.' })
   if (!passwordMatches(password, user.password_hash)) return res.status(401).json({ error: 'Incorrect password.' })
-  const safeUser = { id: user.id, username: user.username, total_points: user.total_points }
+  const safeUser = { id: user.id, username: user.username, name: user.name, total_points: user.total_points }
   startSession(res, safeUser)
   res.json({ user: safeUser })
 })
@@ -210,7 +214,7 @@ app.post('/api/auth/reset-organizer-password', (req, res) => {
   if (error) return res.status(400).json({ error })
   if (!organizerPasscode) return res.status(503).json({ error: 'Organizer passcode is not configured on this server.' })
   if (!organizerPasscodeMatches(req)) return res.status(403).json({ error: 'Incorrect organizer passcode.' })
-  const user = db.prepare('SELECT id, username, total_points FROM users WHERE username = ?').get(organizerUsername)
+  const user = db.prepare('SELECT id, username, name, total_points FROM users WHERE username = ?').get(organizerUsername)
   if (!user) return res.status(404).json({ error: 'Organizer account not found.' })
   db.transaction(() => {
     db.prepare('UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(hashPassword(password), user.id)
@@ -235,7 +239,7 @@ app.post('/api/users', (req, res) => {
 
 app.get('/api/users', (req, res) => {
   const username = String(req.query.username || '').trim()
-  const user = db.prepare('SELECT id, username, total_points FROM users WHERE username = ?').get(username)
+  const user = db.prepare('SELECT id, username, name, total_points FROM users WHERE username = ?').get(username)
   if (!user) return res.status(404).json({ error: 'User not found.' })
   res.json({ user })
 })
@@ -246,10 +250,10 @@ app.get('/api/weekly-matches', requireUser, (req, res) => {
     FROM weekly_match_sessions w
     LEFT JOIN weekly_match_registrations r ON r.session_id = w.id AND r.user_id = ?
     WHERE w.starts_at >= ? ORDER BY w.starts_at ASC`).all(req.authUser.id, new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
-  const registrationQuery = db.prepare(`SELECT u.id, u.username, r.registered_at
+  const registrationQuery = db.prepare(`SELECT u.id, u.username, u.name, r.registered_at
     FROM weekly_match_registrations r JOIN users u ON u.id = r.user_id
     WHERE r.session_id = ? ORDER BY r.registered_at ASC`)
-  const pairingQuery = db.prepare(`SELECT p.pairing_order, p.player_one_id, p.player_two_id, one.username AS player_one_name, two.username AS player_two_name
+  const pairingQuery = db.prepare(`SELECT p.pairing_order, p.player_one_id, p.player_two_id, one.username AS player_one_name, two.username AS player_two_name, one.name AS player_one_display_name, two.name AS player_two_display_name
     FROM weekly_match_pairings p JOIN users one ON one.id = p.player_one_id JOIN users two ON two.id = p.player_two_id
     WHERE p.session_id = ? ORDER BY p.pairing_order ASC`)
   res.json({ sessions: sessions.map((session) => ({ ...session, registered: Boolean(session.current_user_registered), registrations: registrationQuery.all(session.id), pairings: pairingQuery.all(session.id) })) })
@@ -346,7 +350,7 @@ app.post('/api/weekly-matches/:id/draw/generate', requireUser, (req, res) => {
 })
 
 app.get('/api/organizer/users', requireOrganizer, (_req, res) => {
-  const users = db.prepare('SELECT id, username, total_points FROM users ORDER BY total_points DESC, username COLLATE NOCASE ASC').all()
+  const users = db.prepare('SELECT id, username, name, total_points FROM users ORDER BY total_points DESC, username COLLATE NOCASE ASC').all()
   res.json({ users })
 })
 
@@ -395,6 +399,34 @@ app.post('/api/tournaments', requireOrganizer, (req, res) => {
     RETURNING *
   `).get(name, description, location, `${startDate}T09:00:00`, `${endDate}T23:00:00`, registrationClosesAt, status, tierKey, tier.maxPlayers, organizer.id)
   res.status(201).json({ tournament })
+})
+
+app.patch('/api/tournaments/:id', requireOrganizer, (req, res) => {
+  const tournamentId = Number(req.params.id)
+  const existing = db.prepare('SELECT * FROM tournaments WHERE id = ?').get(tournamentId)
+  if (!existing) return res.status(404).json({ error: 'Tournament not found.' })
+  if (existing.status !== 'upcoming') return res.status(400).json({ error: 'Only upcoming tournaments can be edited.' })
+  const name = String(req.body?.name || '').trim()
+  const startDate = String(req.body?.startDate || '').trim()
+  const tierKey = String(req.body?.tournamentTier || 'rally_500')
+  const tier = tournamentTiers[tierKey]
+  const location = String(req.body?.location || '').trim() || null
+  const description = String(req.body?.description || '').trim() || null
+  if (!name || name.length > 100) return res.status(400).json({ error: 'Tournament name is required (up to 100 characters).' })
+  const isValidDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T12:00:00Z`))
+  if (!tier) return res.status(400).json({ error: 'Choose a valid tournament tier.' })
+  if (!isValidDate(startDate)) return res.status(400).json({ error: 'Choose a valid start date.' })
+  const registeredCount = db.prepare("SELECT COUNT(*) AS count FROM tournament_players WHERE tournament_id = ? AND registration_status = 'registered'").get(tournamentId).count
+  if (registeredCount > tier.maxPlayers) return res.status(400).json({ error: `This tournament already has ${registeredCount} registered players, which exceeds the ${tier.maxPlayers}-player limit for this tier.` })
+  const end = new Date(`${startDate}T12:00:00`)
+  end.setDate(end.getDate() + tier.days - 1)
+  const endDate = end.toISOString().slice(0, 10)
+  const today = new Date().toISOString().slice(0, 10)
+  const status = endDate < today ? 'past' : startDate > today ? 'upcoming' : 'current'
+  const registrationClosesAt = new Date(new Date(`${startDate}T09:00:00`).getTime() - 4 * 24 * 60 * 60 * 1000).toISOString()
+  const tournament = db.prepare(`UPDATE tournaments SET name = ?, description = ?, location = ?, starts_at = ?, ends_at = ?, registration_closes_at = ?, status = ?, tournament_tier = ?, max_players = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ? RETURNING *`).get(name, description, location, `${startDate}T09:00:00`, `${endDate}T23:00:00`, registrationClosesAt, status, tierKey, tier.maxPlayers, tournamentId)
+  res.json({ tournament })
 })
 
 app.get('/api/tournaments', (req, res) => {
@@ -459,7 +491,7 @@ app.get('/api/tournaments/:id', (req, res) => {
   const tournamentId = Number(req.params.id)
   const tournament = db.prepare('SELECT * FROM tournaments WHERE id = ?').get(tournamentId)
   if (!tournament) return res.status(404).json({ error: 'Tournament not found.' })
-  const players = db.prepare(`SELECT u.id, u.username, tp.seed, tp.points_earned, tp.registered_at
+  const players = db.prepare(`SELECT u.id, u.username, u.name, tp.seed, tp.points_earned, tp.registered_at
     FROM tournament_players tp JOIN users u ON u.id = tp.user_id
     WHERE tp.tournament_id = ? AND tp.registration_status = 'registered'
     ORDER BY tp.seed IS NULL, tp.seed, u.username COLLATE NOCASE`).all(tournamentId)
@@ -470,9 +502,9 @@ app.get('/api/tournaments/:id', (req, res) => {
   // the separate organizer passcode through requireOrganizer.
   const organizerPreview = isOrganizerAccount(req)
   const canViewDraw = publicDrawVisible || organizerPreview
-  const matches = canViewDraw ? db.prepare(`SELECT m.*, p1.username AS player_one_name, p2.username AS player_two_name,
+  const matches = canViewDraw ? db.prepare(`SELECT m.*, p1.username AS player_one_name, p2.username AS player_two_name, p1.name AS player_one_display_name, p2.name AS player_two_display_name,
       tp1.seed AS player_one_seed, tp2.seed AS player_two_seed,
-      r.winner_user_id, winner.username AS winner_name, r.player_one_score, r.player_two_score
+      r.winner_user_id, COALESCE(NULLIF(winner.name, ''), winner.username) AS winner_name, r.player_one_score, r.player_two_score
     FROM matches m
     JOIN users p1 ON p1.id = m.player_one_id JOIN users p2 ON p2.id = m.player_two_id
     LEFT JOIN tournament_players tp1 ON tp1.tournament_id = m.tournament_id AND tp1.user_id = m.player_one_id
@@ -716,7 +748,7 @@ app.post('/api/matches/:id/bye', requireOrganizer, (req, res) => {
   res.json({ completed: true, winnerUserId, bye: true })
 })
 
-app.get('/api/leaderboard', (_req, res) => res.json({ players: db.prepare('SELECT * FROM leaderboard WHERE total_points > 0 ORDER BY rank').all() }))
+app.get('/api/leaderboard', (_req, res) => res.json({ players: db.prepare('SELECT leaderboard.*, users.name FROM leaderboard JOIN users ON users.id = leaderboard.user_id WHERE leaderboard.total_points > 0 ORDER BY leaderboard.rank').all() }))
 
 const dist = path.join(root, 'dist')
 if (fs.existsSync(dist)) { app.use(express.static(dist)); app.get('*', (_req, res) => res.sendFile(path.join(dist, 'index.html'))) }

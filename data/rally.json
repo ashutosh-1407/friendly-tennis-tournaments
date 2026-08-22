@@ -1,14 +1,15 @@
 {
   "version": 1,
-  "savedAt": "2026-08-21T02:32:00.136Z",
+  "savedAt": "2026-08-22T00:36:16.394Z",
   "users": [
     {
       "id": 1,
       "username": "ashutosh.1407",
       "total_points": 0,
       "created_at": "2026-08-18 00:43:02",
-      "updated_at": "2026-08-19 07:55:56",
-      "password_hash": "6b3222b32879b3cea0aa6590ffcc64f5:0acf56fd0d00b18f8cc8b50aa044eea22b2dd2c5338d0996f8b45fe132c01adc93dd123c0d1871a50cbc0cccc4937e5c52e96da7fa2c33662e83361af713aa75"
+      "updated_at": "2026-08-22 00:35:59",
+      "password_hash": "6b3222b32879b3cea0aa6590ffcc64f5:0acf56fd0d00b18f8cc8b50aa044eea22b2dd2c5338d0996f8b45fe132c01adc93dd123c0d1871a50cbc0cccc4937e5c52e96da7fa2c33662e83361af713aa75",
+      "name": "Ashu"
     },
     {
       "id": 2,
@@ -16,15 +17,17 @@
       "total_points": 0,
       "created_at": "2026-08-18 00:44:22",
       "updated_at": "2026-08-18 00:44:22",
-      "password_hash": null
+      "password_hash": null,
+      "name": null
     },
     {
       "id": 3,
-      "username": "Ashu",
+      "username": "trojanashu",
       "total_points": 71,
       "created_at": "2026-08-18 00:58:47",
       "updated_at": "2026-08-19 18:04:31",
-      "password_hash": "761da46567cb57ff8845ac5d026c88fa:4b8a99f46560ba09a85bdb86503482592b4921f9b863ca23e3c312c5adf4643c06b1862941be062a25b9fa8a42c4533d15c08b10bbdcf97f9933ea68a87f83e3"
+      "password_hash": "761da46567cb57ff8845ac5d026c88fa:4b8a99f46560ba09a85bdb86503482592b4921f9b863ca23e3c312c5adf4643c06b1862941be062a25b9fa8a42c4533d15c08b10bbdcf97f9933ea68a87f83e3",
+      "name": "Ash"
     },
     {
       "id": 4,
@@ -32,7 +35,8 @@
       "total_points": 0,
       "created_at": "2026-08-18 00:58:47",
       "updated_at": "2026-08-19 03:28:29",
-      "password_hash": null
+      "password_hash": null,
+      "name": null
     },
     {
       "id": 5,
@@ -40,7 +44,8 @@
       "total_points": 0,
       "created_at": "2026-08-18 00:58:47",
       "updated_at": "2026-08-19 07:55:56",
-      "password_hash": null
+      "password_hash": null,
+      "name": null
     },
     {
       "id": 6,
@@ -48,7 +53,8 @@
       "total_points": 571,
       "created_at": "2026-08-18 00:58:47",
       "updated_at": "2026-08-20 01:04:44",
-      "password_hash": null
+      "password_hash": null,
+      "name": null
     },
     {
       "id": 7,
@@ -56,7 +62,8 @@
       "total_points": 71,
       "created_at": "2026-08-18 00:58:47",
       "updated_at": "2026-08-19 04:00:22",
-      "password_hash": null
+      "password_hash": null,
+      "name": null
     },
     {
       "id": 8,
@@ -64,7 +71,8 @@
       "total_points": 71,
       "created_at": "2026-08-18 00:58:47",
       "updated_at": "2026-08-19 04:00:22",
-      "password_hash": null
+      "password_hash": null,
+      "name": null
     },
     {
       "id": 9,
@@ -72,7 +80,8 @@
       "total_points": 0,
       "created_at": "2026-08-18 00:58:47",
       "updated_at": "2026-08-19 03:58:11",
-      "password_hash": null
+      "password_hash": null,
+      "name": null
     },
     {
       "id": 10,
@@ -80,7 +89,8 @@
       "total_points": 213,
       "created_at": "2026-08-18 00:58:47",
       "updated_at": "2026-08-19 07:55:56",
-      "password_hash": null
+      "password_hash": null,
+      "name": null
     },
     {
       "id": 11,
@@ -88,7 +98,8 @@
       "total_points": 0,
       "created_at": "2026-08-18 00:58:47",
       "updated_at": "2026-08-18 00:58:47",
-      "password_hash": null
+      "password_hash": null,
+      "name": null
     },
     {
       "id": 12,
@@ -96,7 +107,8 @@
       "total_points": 0,
       "created_at": "2026-08-18 00:58:47",
       "updated_at": "2026-08-18 00:58:47",
-      "password_hash": null
+      "password_hash": null,
+      "name": null
     },
     {
       "id": 13,
@@ -104,7 +116,8 @@
       "total_points": 0,
       "created_at": "2026-08-18 00:58:47",
       "updated_at": "2026-08-18 00:58:47",
-      "password_hash": null
+      "password_hash": null,
+      "name": null
     },
     {
       "id": 14,
@@ -112,7 +125,8 @@
       "total_points": 0,
       "created_at": "2026-08-18 00:58:47",
       "updated_at": "2026-08-18 00:58:47",
-      "password_hash": null
+      "password_hash": null,
+      "name": null
     },
     {
       "id": 15,
@@ -120,7 +134,8 @@
       "total_points": 0,
       "created_at": "2026-08-18 00:58:47",
       "updated_at": "2026-08-18 00:58:47",
-      "password_hash": null
+      "password_hash": null,
+      "name": null
     },
     {
       "id": 16,
@@ -128,7 +143,8 @@
       "total_points": 0,
       "created_at": "2026-08-18 00:58:47",
       "updated_at": "2026-08-18 00:58:47",
-      "password_hash": null
+      "password_hash": null,
+      "name": null
     },
     {
       "id": 17,
@@ -136,7 +152,8 @@
       "total_points": 0,
       "created_at": "2026-08-18 00:58:47",
       "updated_at": "2026-08-18 00:58:47",
-      "password_hash": null
+      "password_hash": null,
+      "name": null
     },
     {
       "id": 18,
@@ -144,7 +161,8 @@
       "total_points": 0,
       "created_at": "2026-08-18 00:58:47",
       "updated_at": "2026-08-18 00:58:47",
-      "password_hash": null
+      "password_hash": null,
+      "name": null
     },
     {
       "id": 19,
@@ -152,7 +170,8 @@
       "total_points": 0,
       "created_at": "2026-08-19 04:16:04",
       "updated_at": "2026-08-19 04:16:04",
-      "password_hash": null
+      "password_hash": null,
+      "name": null
     }
   ],
   "tournaments": [
@@ -833,10 +852,10 @@
       "created_at": "2026-08-20 19:47:03"
     },
     {
-      "token": "d110fe0e0a5b1ece86b97d1eb93b5f1fe913b65886d71bc2a0ef58d8dc8aebe6",
+      "token": "7e718db1ddfc4d148dd88765617fe34ddaaedb9690adbdb0f5723ff706457ba1",
       "user_id": 1,
-      "expires_at": "2026-09-20T02:31:51.895Z",
-      "created_at": "2026-08-21 02:31:51"
+      "expires_at": "2026-09-21T00:36:16.394Z",
+      "created_at": "2026-08-22 00:36:16"
     }
   ]
 }
