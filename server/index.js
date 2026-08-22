@@ -308,7 +308,7 @@ app.get('/api/weekly-matches', requireUser, (req, res) => {
 })
 
 app.post('/api/weekly-matches', requireUser, (req, res) => {
-  const startsAt = new Date(String(req.body?.startsAt || ''))
+  const startsAt = rallyDateTime(String(req.body?.startsAt || ''))
   const requiredPlayers = Number(req.body?.requiredPlayers)
   const courtName = String(req.body?.courtName || '').trim().slice(0, 120)
   const courtNumbers = String(req.body?.courtNumbers || '').trim().slice(0, 80)
@@ -325,7 +325,7 @@ app.patch('/api/weekly-matches/:id', requireUser, (req, res) => {
   const session = db.prepare('SELECT * FROM weekly_match_sessions WHERE id = ?').get(sessionId)
   if (!session) return res.status(404).json({ error: 'Weekly match not found.' })
   if (new Date() >= new Date(session.starts_at)) return res.status(400).json({ error: 'A weekly match cannot be changed after it starts.' })
-  const startsAt = new Date(String(req.body?.startsAt || ''))
+  const startsAt = rallyDateTime(String(req.body?.startsAt || ''))
   const requiredPlayers = Number(req.body?.requiredPlayers)
   const courtName = String(req.body?.courtName || '').trim().slice(0, 120)
   const courtNumbers = String(req.body?.courtNumbers || '').trim().slice(0, 80)
@@ -511,6 +511,15 @@ app.patch('/api/tournaments/:id', requireOrganizer, (req, res) => {
   const tournament = db.prepare(`UPDATE tournaments SET name = ?, description = ?, location = ?, starts_at = ?, ends_at = ?, registration_closes_at = ?, status = ?, tournament_tier = ?, max_players = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ? RETURNING *`).get(name, description, location, `${startDate}T09:00:00`, `${endDate}T23:00:00`, registrationClosesAt, status, tierKey, tier.maxPlayers, tournamentId)
   res.json({ tournament })
+})
+
+app.delete('/api/tournaments/:id', requireOrganizer, (req, res) => {
+  const tournamentId = Number(req.params.id)
+  const tournament = db.prepare('SELECT id, name, status FROM tournaments WHERE id = ?').get(tournamentId)
+  if (!tournament) return res.status(404).json({ error: 'Tournament not found.' })
+  if (tournament.status !== 'upcoming') return res.status(400).json({ error: 'Only upcoming tournaments can be deleted.' })
+  db.prepare('DELETE FROM tournaments WHERE id = ?').run(tournament.id)
+  res.json({ deleted: true, name: tournament.name })
 })
 
 app.get('/api/tournaments', (req, res) => {
@@ -787,9 +796,25 @@ function refreshTournamentStatuses() {
 }
 
 function rallyCalendarDate(date = new Date()) {
-  const parts = new Intl.DateTimeFormat('en-US', { timeZone: rallyTimeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date)
-  const values = Object.fromEntries(parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]))
+  const values = rallyTimeParts(date)
   return `${values.year}-${values.month}-${values.day}`
+}
+
+function rallyDateTime(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value)
+  if (!match) return new Date('invalid')
+  const [, year, month, day, hour, minute] = match
+  const desiredUtc = Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute))
+  const atGuess = rallyTimeParts(new Date(desiredUtc))
+  const offset = Date.UTC(Number(atGuess.year), Number(atGuess.month) - 1, Number(atGuess.day), Number(atGuess.hour), Number(atGuess.minute)) - desiredUtc
+  const date = new Date(desiredUtc - offset)
+  const resolved = rallyTimeParts(date)
+  return resolved.year === year && resolved.month === month && resolved.day === day && resolved.hour === hour && resolved.minute === minute ? date : new Date('invalid')
+}
+
+function rallyTimeParts(date) {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: rallyTimeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(date)
+  return Object.fromEntries(parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]))
 }
 
 app.post('/api/matches/:id/result', requireUser, (req, res) => {
