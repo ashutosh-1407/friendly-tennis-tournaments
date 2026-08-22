@@ -111,6 +111,7 @@ function restoreDatabase() {
 
 try {
   if (restoreDatabase()) console.log('Rally data restored from JSON snapshot')
+  refreshTournamentStatuses()
   refreshUserPoints()
   persistDatabase()
 } catch (error) {
@@ -123,6 +124,7 @@ app.use(express.json())
 // Rebuild the cached totals from the individual tournament awards so expiry is
 // accurate even after a server restart or a long period without activity.
 app.use((_req, _res, next) => {
+  refreshTournamentStatuses()
   refreshUserPoints()
   next()
 })
@@ -680,17 +682,34 @@ function recalculateTournamentPoints(tournamentId) {
 }
 
 function refreshUserPoints() {
-  const expiresBefore = new Date(Date.now() - pointsExpiryDays * 24 * 60 * 60 * 1000).toISOString()
-  const earnedByUser = db.prepare(`SELECT tp.user_id, SUM(tp.points_earned) AS total_points
+  const expiresBefore = new Date(Date.now() - pointsExpiryDays * 24 * 60 * 60 * 1000)
+  const pointAwards = db.prepare(`SELECT tp.user_id, tp.points_earned, t.ends_at
     FROM tournament_players tp
     JOIN tournaments t ON t.id = tp.tournament_id
-    WHERE tp.registration_status = 'registered' AND t.ends_at > ?
-    GROUP BY tp.user_id`).all(expiresBefore)
-  const totals = new Map(earnedByUser.map((row) => [row.user_id, Number(row.total_points) || 0]))
+    WHERE tp.registration_status = 'registered'`).all()
+  const totals = new Map()
+  for (const award of pointAwards) {
+    const tournamentEnd = new Date(award.ends_at)
+    if (Number.isNaN(tournamentEnd.getTime()) || tournamentEnd <= expiresBefore) continue
+    totals.set(award.user_id, (totals.get(award.user_id) || 0) + (Number(award.points_earned) || 0))
+  }
   const update = db.prepare('UPDATE users SET total_points = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND total_points <> ?')
   for (const user of db.prepare('SELECT id, total_points FROM users').all()) {
     const total = totals.get(user.id) || 0
     if (user.total_points !== total) update.run(total, user.id, total)
+  }
+}
+
+function refreshTournamentStatuses() {
+  const now = new Date()
+  const update = db.prepare('UPDATE tournaments SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status <> ?')
+  const tournaments = db.prepare("SELECT id, starts_at, ends_at, status FROM tournaments WHERE status <> 'cancelled'").all()
+  for (const tournament of tournaments) {
+    const startsAt = new Date(tournament.starts_at)
+    const endsAt = new Date(tournament.ends_at)
+    if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) continue
+    const status = now >= endsAt ? 'past' : now >= startsAt ? 'current' : 'upcoming'
+    if (tournament.status !== status) update.run(status, tournament.id, status)
   }
 }
 
