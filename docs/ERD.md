@@ -49,6 +49,16 @@ erDiagram
     TEXT status
   }
 
+  tournament_draw_nodes {
+    INTEGER id PK
+    INTEGER tournament_id FK
+    TEXT round_name
+    INTEGER match_order
+    INTEGER player_one_id FK
+    INTEGER player_two_id FK
+    INTEGER winner_user_id FK
+  }
+
   match_results {
     INTEGER match_id PK, FK
     INTEGER winner_user_id FK
@@ -104,7 +114,11 @@ erDiagram
   users ||--o{ tournaments : creates
   users ||--o{ tournament_players : enters
   tournaments ||--o{ tournament_players : includes
+  tournaments ||--o{ tournament_draw_nodes : has
   tournaments ||--o{ matches : has
+  users ||--o{ tournament_draw_nodes : "player one"
+  users ||--o{ tournament_draw_nodes : "player two"
+  users ||--o{ tournament_draw_nodes : advances
   users ||--o{ matches : "player one"
   users ||--o{ matches : "player two"
   matches ||--o| match_results : produces

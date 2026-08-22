@@ -6,9 +6,9 @@ Rally helps a group of friends organize tennis tournaments and casual weekly cou
 
 1. Open the Rally link shared by your organizer.
 2. Choose **Sign in** if you already have an account.
-3. Create an account if the organizer has provided you with signup access.
+3. Choose **Sign up** to create your username, optional display name, and password.
 
-You stay signed in on that device. Use **Switch** in the top-right corner to use a different account.
+Your display name is used around Rally when you provide one; otherwise Rally shows your username. You stay signed in on that device. Use **Switch** in the top-right corner to use a different account.
 
 ## Weekly matches
 
@@ -39,12 +39,18 @@ Open any tournament card to see the registered players and, when available, its 
 - Before that deadline, the same button becomes **Withdraw** if you are registered.
 - Registration closes four days before the tournament; after that, the player list is final.
 
+### Tournament formats
+
+- **Rally 250 · Court Sprint** is a one-day event for up to 16 players, played as one set per match.
+- **Rally 500 · Weekend Classic** is a two-day event for up to 32 players, played as best of three sets.
+
 ## Draws and scores
 
 - Draws normally become visible two days before play, or earlier if the organizer publishes them.
 - In a current tournament, tap your match to enter its score.
 - Either player may submit a score once. Only the organizer can correct a submitted result.
 - Winners advance automatically in the bracket.
+- Draws support fields from 5 to 32 players. When the field is not a power of two, the draw uses automatic **BYE** slots; the highest seeds receive byes first.
 - **Rally 250** uses one set. **Rally 500** uses best of three sets, with a first-to-10 match tiebreak if the first two sets are split.
 
 ## Leaderboard

@@ -82,6 +82,17 @@ CREATE TABLE IF NOT EXISTS matches (
   UNIQUE (tournament_id, round_name, match_order)
 );
 
+CREATE TABLE IF NOT EXISTS tournament_draw_nodes (
+  id INTEGER PRIMARY KEY,
+  tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+  round_name TEXT NOT NULL,
+  match_order INTEGER NOT NULL,
+  player_one_id INTEGER REFERENCES users(id),
+  player_two_id INTEGER REFERENCES users(id),
+  winner_user_id INTEGER REFERENCES users(id),
+  UNIQUE (tournament_id, round_name, match_order)
+);
+
 CREATE TABLE IF NOT EXISTS match_results (
   match_id INTEGER PRIMARY KEY REFERENCES matches(id) ON DELETE CASCADE,
   winner_user_id INTEGER NOT NULL REFERENCES users(id),
@@ -130,5 +141,6 @@ CREATE INDEX IF NOT EXISTS idx_tournaments_status_starts_at ON tournaments(statu
 CREATE INDEX IF NOT EXISTS idx_tournament_players_user ON tournament_players(user_id, registration_status);
 CREATE INDEX IF NOT EXISTS idx_access_requests_status ON access_requests(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_matches_tournament ON matches(tournament_id, status);
+CREATE INDEX IF NOT EXISTS idx_draw_nodes_tournament ON tournament_draw_nodes(tournament_id, round_name, match_order);
 CREATE INDEX IF NOT EXISTS idx_weekly_match_sessions_starts_at ON weekly_match_sessions(starts_at);
 CREATE INDEX IF NOT EXISTS idx_weekly_match_registrations_session ON weekly_match_registrations(session_id, registered_at);

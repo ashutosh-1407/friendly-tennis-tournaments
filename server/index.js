@@ -56,7 +56,7 @@ if (!db.prepare("SELECT 1 FROM pragma_table_info('weekly_match_sessions') WHERE 
 
 const snapshotPath = path.join(dataDirectory, 'rally.json')
 const bundledSnapshotPath = path.join(bundledDataDirectory, 'rally.json')
-const snapshotTables = ['users', 'access_requests', 'signup_invites', 'tournaments', 'tournament_players', 'matches', 'match_results', 'weekly_match_sessions', 'weekly_match_registrations', 'weekly_match_pairings', 'sessions']
+const snapshotTables = ['users', 'access_requests', 'signup_invites', 'tournaments', 'tournament_players', 'tournament_draw_nodes', 'matches', 'match_results', 'weekly_match_sessions', 'weekly_match_registrations', 'weekly_match_pairings', 'sessions']
 
 // A new Railway Volume starts empty. Seed it once from the deployed snapshot,
 // then all later changes are saved only on the persistent Volume.
@@ -101,7 +101,7 @@ function restoreDatabase() {
   if (!fs.existsSync(snapshotPath)) return false
   const snapshot = JSON.parse(fs.readFileSync(snapshotPath, 'utf8'))
   const restore = db.transaction(() => {
-    db.exec('DELETE FROM sessions; DELETE FROM signup_invites; DELETE FROM access_requests; DELETE FROM match_results; DELETE FROM matches; DELETE FROM tournament_players; DELETE FROM weekly_match_pairings; DELETE FROM weekly_match_registrations; DELETE FROM weekly_match_sessions; DELETE FROM tournaments; DELETE FROM users;')
+    db.exec('DELETE FROM sessions; DELETE FROM signup_invites; DELETE FROM access_requests; DELETE FROM match_results; DELETE FROM matches; DELETE FROM tournament_draw_nodes; DELETE FROM tournament_players; DELETE FROM weekly_match_pairings; DELETE FROM weekly_match_registrations; DELETE FROM weekly_match_sessions; DELETE FROM tournaments; DELETE FROM users;')
     for (const table of snapshotTables) {
       const rows = Array.isArray(snapshot[table]) ? snapshot[table] : []
       if (!rows.length) continue
@@ -573,6 +573,7 @@ app.delete('/api/tournaments/:id/registrations', requireUser, (req, res) => {
   const withdraw = db.transaction(() => {
     // A provisional draw must reflect the final field, so reset it when a player withdraws.
     db.prepare('DELETE FROM matches WHERE tournament_id = ?').run(tournamentId)
+    db.prepare('DELETE FROM tournament_draw_nodes WHERE tournament_id = ?').run(tournamentId)
     db.prepare("DELETE FROM tournament_players WHERE tournament_id = ? AND user_id = ? AND registration_status = 'registered'").run(tournamentId, user.id)
     recalculateTournamentPoints(tournamentId)
   })
@@ -595,7 +596,20 @@ app.get('/api/tournaments/:id', (req, res) => {
   // the separate organizer passcode through requireOrganizer.
   const organizerPreview = isOrganizerAccount(req)
   const canViewDraw = publicDrawVisible || organizerPreview
-  const matches = canViewDraw ? db.prepare(`SELECT m.*, p1.username AS player_one_name, p2.username AS player_two_name, p1.name AS player_one_display_name, p2.name AS player_two_display_name,
+  const hasDrawNodes = Boolean(db.prepare('SELECT 1 FROM tournament_draw_nodes WHERE tournament_id = ? LIMIT 1').get(tournamentId))
+  const matches = canViewDraw ? (hasDrawNodes ? db.prepare(`SELECT m.id, n.id AS node_id, n.tournament_id, n.round_name, n.match_order, n.player_one_id, n.player_two_id,
+      COALESCE(m.status, CASE WHEN n.winner_user_id IS NOT NULL THEN 'completed' ELSE 'scheduled' END) AS status,
+      p1.username AS player_one_name, p2.username AS player_two_name, p1.name AS player_one_display_name, p2.name AS player_two_display_name,
+      tp1.seed AS player_one_seed, tp2.seed AS player_two_seed,
+      COALESCE(r.winner_user_id, n.winner_user_id) AS winner_user_id, COALESCE(NULLIF(winner.name, ''), winner.username) AS winner_name, r.player_one_score, r.player_two_score
+    FROM tournament_draw_nodes n
+    LEFT JOIN matches m ON m.tournament_id = n.tournament_id AND m.round_name = n.round_name AND m.match_order = n.match_order
+    LEFT JOIN users p1 ON p1.id = n.player_one_id LEFT JOIN users p2 ON p2.id = n.player_two_id
+    LEFT JOIN tournament_players tp1 ON tp1.tournament_id = n.tournament_id AND tp1.user_id = n.player_one_id
+    LEFT JOIN tournament_players tp2 ON tp2.tournament_id = n.tournament_id AND tp2.user_id = n.player_two_id
+    LEFT JOIN match_results r ON r.match_id = m.id
+    LEFT JOIN users winner ON winner.id = COALESCE(r.winner_user_id, n.winner_user_id)
+    WHERE n.tournament_id = ? ORDER BY n.round_name, n.match_order`).all(tournamentId) : db.prepare(`SELECT m.*, p1.username AS player_one_name, p2.username AS player_two_name, p1.name AS player_one_display_name, p2.name AS player_two_display_name,
       tp1.seed AS player_one_seed, tp2.seed AS player_two_seed,
       r.winner_user_id, COALESCE(NULLIF(winner.name, ''), winner.username) AS winner_name, r.player_one_score, r.player_two_score
     FROM matches m
@@ -604,7 +618,7 @@ app.get('/api/tournaments/:id', (req, res) => {
     LEFT JOIN tournament_players tp2 ON tp2.tournament_id = m.tournament_id AND tp2.user_id = m.player_two_id
     LEFT JOIN match_results r ON r.match_id = m.id
     LEFT JOIN users winner ON winner.id = r.winner_user_id
-    WHERE m.tournament_id = ? ORDER BY m.match_order`).all(tournamentId) : []
+    WHERE m.tournament_id = ? ORDER BY m.match_order`).all(tournamentId)) : []
   const bracketSize = players.length > 1 ? 2 ** Math.ceil(Math.log2(players.length)) : 0
   const roundNames = { 2: 'Final', 4: 'Semifinals', 8: 'Quarterfinals', 16: 'Round of 16', 32: 'Round of 32' }
   const rounds = []
@@ -635,26 +649,38 @@ app.post('/api/tournaments/:id/draw/generate', requireOrganizer, (req, res) => {
     const roundNames = { 2: 'Final', 4: 'Semifinals', 8: 'Quarterfinals', 16: 'Round of 16', 32: 'Round of 32' }
     const openingRound = roundNames[bracketSize] || `Round of ${bracketSize}`
     db.prepare('DELETE FROM matches WHERE tournament_id = ?').run(tournamentId)
+    db.prepare('DELETE FROM tournament_draw_nodes WHERE tournament_id = ?').run(tournamentId)
     recalculateTournamentPoints(tournamentId)
-    const insert = db.prepare(`INSERT INTO matches (tournament_id, round_name, match_order, player_one_id, player_two_id)
-      VALUES (?, ?, ?, ?, ?)`)
-    let pairs
-    if (players.length === bracketSize) {
-      const slots = Array(bracketSize).fill(null)
-      const seedPositions = [0, bracketSize / 2, bracketSize / 4, (bracketSize * 3) / 4]
-      const seededPlayers = players.filter((player) => player.seed && player.seed <= 4).sort((left, right) => left.seed - right.seed)
-      seededPlayers.forEach((player) => { slots[seedPositions[player.seed - 1]] = player })
-      const remainingPlayers = shuffle(players.filter((player) => !seededPlayers.some((seeded) => seeded.user_id === player.user_id)))
-      slots.forEach((slot, index) => { if (!slot) slots[index] = remainingPlayers.shift() })
-      pairs = Array.from({ length: bracketSize / 2 }, (_, index) => [slots[index * 2], slots[index * 2 + 1]])
-    } else {
-      const seededPlayers = players.filter((player) => player.seed && player.seed <= 4).sort((left, right) => left.seed - right.seed)
-      const remainingPlayers = shuffle(players.filter((player) => !seededPlayers.some((seeded) => seeded.user_id === player.user_id)))
-      pairs = []
-      while (seededPlayers.length || remainingPlayers.length) pairs.push([seededPlayers.shift() || remainingPlayers.shift(), remainingPlayers.shift() || seededPlayers.shift()])
+    const slots = Array(bracketSize).fill(null)
+    const seedPositions = [0, bracketSize / 2, bracketSize / 4, (bracketSize * 3) / 4]
+    const seededPlayers = players.filter((player) => player.seed && player.seed <= 4).sort((left, right) => left.seed - right.seed)
+    seededPlayers.forEach((player) => { slots[seedPositions[player.seed - 1]] = player.user_id })
+    const byeCount = bracketSize - players.length
+    const reservedByeSlots = new Set()
+    seededPlayers.slice(0, byeCount).forEach((player) => {
+      const position = seedPositions[player.seed - 1]
+      reservedByeSlots.add(position % 2 === 0 ? position + 1 : position - 1)
+    })
+    const remainingPlayers = shuffle(players.filter((player) => !seededPlayers.some((seeded) => seeded.user_id === player.user_id)).map((player) => player.user_id))
+    slots.forEach((_slot, index) => {
+      if (!slots[index] && !reservedByeSlots.has(index)) slots[index] = remainingPlayers.shift() || null
+    })
+    const insertNode = db.prepare('INSERT INTO tournament_draw_nodes (tournament_id, round_name, match_order, player_one_id, player_two_id) VALUES (?, ?, ?, ?, ?)')
+    let roundSize = bracketSize
+    let roundIndex = 0
+    while (roundSize >= 2) {
+      const roundName = roundNames[roundSize] || `Round of ${roundSize}`
+      const nodeCount = roundSize / 2
+      for (let order = 1; order <= nodeCount; order += 1) {
+        const slotIndex = (order - 1) * 2
+        insertNode.run(tournamentId, roundName, order, roundIndex === 0 ? slots[slotIndex] : null, roundIndex === 0 ? slots[slotIndex + 1] : null)
+      }
+      roundSize /= 2
+      roundIndex += 1
     }
-    pairs.filter(([one, two]) => one && two).forEach(([one, two], index) => insert.run(tournamentId, openingRound, index + 1, one.user_id, two.user_id))
-    return { matchesCreated: pairs.filter(([one, two]) => one && two).length, openingRound, bracketSize }
+    resolveDrawNodes(tournamentId)
+    const matchesCreated = db.prepare('SELECT COUNT(*) AS count FROM matches WHERE tournament_id = ?').get(tournamentId).count
+    return { matchesCreated, openingRound, bracketSize, byes: byeCount }
   })
   res.json(generate())
 })
@@ -683,6 +709,7 @@ app.post('/api/tournaments/:id/draw/reset', requireOrganizer, (req, res) => {
   if (tournament.status === 'past') return res.status(400).json({ error: 'Draws cannot be changed for past tournaments.' })
   const reset = db.transaction(() => {
     db.prepare('DELETE FROM matches WHERE tournament_id = ?').run(tournament.id)
+    db.prepare('DELETE FROM tournament_draw_nodes WHERE tournament_id = ?').run(tournament.id)
     db.prepare('UPDATE tournaments SET draw_published_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(tournament.id)
     recalculateTournamentPoints(tournament.id)
   })
@@ -711,6 +738,12 @@ function validStandardSet(set) {
 }
 
 function advanceWinner(match, winnerUserId) {
+  const drawNode = db.prepare('SELECT id FROM tournament_draw_nodes WHERE tournament_id = ? AND round_name = ? AND match_order = ?').get(match.tournament_id, match.round_name, match.match_order)
+  if (drawNode) {
+    db.prepare('UPDATE tournament_draw_nodes SET winner_user_id = ? WHERE id = ?').run(winnerUserId, drawNode.id)
+    resolveDrawNodes(match.tournament_id)
+    return
+  }
   const nextRound = { 'Round of 32': 'Round of 16', 'Round of 16': 'Quarterfinals', Quarterfinals: 'Semifinals', Semifinals: 'Final' }[match.round_name]
   if (!nextRound) return
   const pairedOrder = match.match_order % 2 === 0 ? match.match_order - 1 : match.match_order + 1
@@ -727,6 +760,50 @@ function advanceWinner(match, winnerUserId) {
     db.prepare('UPDATE matches SET player_one_id = ?, player_two_id = ? WHERE id = ?').run(playerOneId, playerTwoId, existingNext.id)
   } else {
     db.prepare('INSERT INTO matches (tournament_id, round_name, match_order, player_one_id, player_two_id) VALUES (?, ?, ?, ?, ?)').run(match.tournament_id, nextRound, nextOrder, playerOneId, playerTwoId)
+  }
+}
+
+function resolveDrawNodes(tournamentId) {
+  const allNodes = db.prepare('SELECT * FROM tournament_draw_nodes WHERE tournament_id = ?').all(tournamentId)
+  if (!allNodes.length) return
+  const rounds = [...new Set(allNodes.map((node) => node.round_name))].sort((left, right) => {
+    const countFor = (round) => allNodes.filter((node) => node.round_name === round).length
+    return countFor(right) - countFor(left)
+  })
+  const nodesByRound = new Map(rounds.map((round) => [round, allNodes.filter((node) => node.round_name === round).sort((left, right) => left.match_order - right.match_order)]))
+  const updateNode = db.prepare('UPDATE tournament_draw_nodes SET player_one_id = ?, player_two_id = ?, winner_user_id = ? WHERE id = ?')
+  const findMatch = db.prepare('SELECT id FROM matches WHERE tournament_id = ? AND round_name = ? AND match_order = ?')
+  const updateMatchPlayers = db.prepare('UPDATE matches SET player_one_id = ?, player_two_id = ? WHERE id = ? AND status != \'completed\'')
+  const insertMatch = db.prepare('INSERT INTO matches (tournament_id, round_name, match_order, player_one_id, player_two_id) VALUES (?, ?, ?, ?, ?)')
+  const isResolved = (node) => Boolean(node.winner_user_id) || (!node.player_one_id && !node.player_two_id)
+
+  for (let roundIndex = 0; roundIndex < rounds.length; roundIndex += 1) {
+    const nodes = nodesByRound.get(rounds[roundIndex])
+    const priorNodes = roundIndex ? nodesByRound.get(rounds[roundIndex - 1]) : null
+    for (const node of nodes) {
+      let one = node.player_one_id
+      let two = node.player_two_id
+      if (priorNodes) {
+        const left = priorNodes[(node.match_order - 1) * 2]
+        const right = priorNodes[(node.match_order - 1) * 2 + 1]
+        if (!isResolved(left) || !isResolved(right)) continue
+        one = left.winner_user_id || null
+        two = right.winner_user_id || null
+      }
+      let winner = node.winner_user_id
+      if (!winner && (one || two) && !(one && two)) winner = one || two
+      if (node.player_one_id !== one || node.player_two_id !== two || node.winner_user_id !== winner) {
+        updateNode.run(one, two, winner, node.id)
+        node.player_one_id = one
+        node.player_two_id = two
+        node.winner_user_id = winner
+      }
+      if (!winner && one && two) {
+        const existingMatch = findMatch.get(tournamentId, node.round_name, node.match_order)
+        if (existingMatch) updateMatchPlayers.run(one, two, existingMatch.id)
+        else insertMatch.run(tournamentId, node.round_name, node.match_order, one, two)
+      }
+    }
   }
 }
 
