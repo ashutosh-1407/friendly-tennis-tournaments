@@ -35,6 +35,11 @@ function EyeIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2.5 12s3.4-5 9.5-5 9.5 5 9.5 5-3.4 5-9.5 5-9.5-5-9.5-5Z" /><circle cx="12" cy="12" r="2.35" /></svg>
 }
 
+function OrganizerPasscodeModal({ onSubmit, onClose }) {
+  const [passcode, setPasscode] = React.useState('')
+  return <div className="score-backdrop" role="presentation" onMouseDown={onClose}><section className="organizer-passcode-modal" role="dialog" aria-modal="true" aria-labelledby="organizer-passcode-title" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" onClick={onClose} aria-label="Close">×</button><p className="eyebrow">ORGANIZER ACCESS</p><h2 id="organizer-passcode-title">Enter organizer passcode</h2><form onSubmit={(event) => { event.preventDefault(); if (passcode) onSubmit(passcode) }}><input className="passcode-input" type="password" value={passcode} onChange={(event) => setPasscode(event.target.value)} autoFocus /><div className="score-actions"><button type="button" className="cancel-button" onClick={onClose}>Cancel</button><button type="submit" className="primary-action">Continue</button></div></form></section></div>
+}
+
 function displayName(player) {
   return player?.name || player?.display_name || player?.username || ''
 }
@@ -169,14 +174,23 @@ function App() {
   const [usersError, setUsersError] = React.useState('')
   const [usersPage, setUsersPage] = React.useState(1)
   const [leaderboardPage, setLeaderboardPage] = React.useState(1)
+  const [passcodePrompt, setPasscodePrompt] = React.useState(null)
 
   function requestOrganizerPasscode() {
-    if (organizerPasscode) return organizerPasscode
-    const passcode = window.prompt('Enter the organizer passcode')
-    if (!passcode) return ''
+    if (organizerPasscode) return Promise.resolve(organizerPasscode)
+    return new Promise((resolve) => setPasscodePrompt({ resolve }))
+  }
+
+  function submitOrganizerPasscode(passcode) {
     sessionStorage.setItem(ORGANIZER_PASSCODE_KEY, passcode)
     setOrganizerPasscode(passcode)
-    return passcode
+    passcodePrompt?.resolve(passcode)
+    setPasscodePrompt(null)
+  }
+
+  function cancelOrganizerPasscode() {
+    passcodePrompt?.resolve('')
+    setPasscodePrompt(null)
   }
 
   React.useEffect(() => {
@@ -228,7 +242,7 @@ function App() {
   async function resetOrganizerPassword() {
     const cleanName = draftName.trim()
     if (cleanName.toLowerCase() !== ORGANIZER_USERNAME || !draftPassword) return
-    const passcode = window.prompt('Enter the organizer passcode to reset this account password')
+    const passcode = await requestOrganizerPasscode()
     if (!passcode) return
     setIsSavingUsername(true)
     setUsernameError('')
@@ -310,7 +324,8 @@ function App() {
 
   React.useEffect(() => {
     if (activeTab !== 'users' || !isOrganizer) return
-    const passcode = requestOrganizerPasscode()
+    ;(async () => {
+    const passcode = await requestOrganizerPasscode()
     if (!passcode) {
       setUsersError('An organizer passcode is required to view registered users.')
       return
@@ -324,6 +339,7 @@ function App() {
       })
       .then((data) => { setRegisteredUsers(data.users); setUsersPage(1) })
       .catch((error) => setUsersError(error.message))
+    })()
   }, [activeTab, isOrganizer, organizerPasscode])
 
   async function registerForTournament(tournament) {
@@ -439,7 +455,7 @@ function App() {
 
   async function deleteWeeklyMatch(sessionId) {
     if (!window.confirm('Delete this weekly match? This removes its registrations and pairings.')) return
-    const passcode = requestOrganizerPasscode()
+    const passcode = await requestOrganizerPasscode()
     if (!passcode) {
       setWeeklyError('An organizer passcode is required to delete a weekly match.')
       return
@@ -533,7 +549,7 @@ function App() {
   }, [detailTab, tournamentDetail])
 
   async function manageDraw(action) {
-    const passcode = requestOrganizerPasscode()
+    const passcode = await requestOrganizerPasscode()
     if (!passcode) {
       setDetailError('An organizer passcode is required to manage the draw.')
       return
@@ -553,7 +569,7 @@ function App() {
   }
 
   async function awardBye(match, winnerUserId) {
-    const passcode = requestOrganizerPasscode()
+    const passcode = await requestOrganizerPasscode()
     if (!passcode) {
       setDetailError('An organizer passcode is required to award a bye.')
       return
@@ -585,7 +601,7 @@ function App() {
     if (!scoreMatch) return
     const isMatchPlayer = [scoreMatch.player_one_name, scoreMatch.player_two_name].some((player) => player.toLowerCase() === username.toLowerCase())
     const isScoreOverride = scoreMatch.status === 'completed'
-    const passcode = isOrganizer && (isScoreOverride || !isMatchPlayer) ? requestOrganizerPasscode() : organizerPasscode
+    const passcode = isOrganizer && (isScoreOverride || !isMatchPlayer) ? await requestOrganizerPasscode() : organizerPasscode
     if (isOrganizer && (isScoreOverride || !isMatchPlayer) && !passcode) {
       setScoreError(isScoreOverride ? 'An organizer passcode is required to change a submitted score.' : 'An organizer passcode is required to enter another player’s score.')
       return
@@ -644,7 +660,7 @@ function App() {
 
   async function createTournament(event) {
     event.preventDefault()
-    const passcode = requestOrganizerPasscode()
+    const passcode = await requestOrganizerPasscode()
     if (!passcode) {
       setCreationError('An organizer passcode is required to create a tournament.')
       return
@@ -680,7 +696,7 @@ function App() {
   async function saveTournamentEdit(event) {
     event.preventDefault()
     if (!editingTournamentId) return
-    const passcode = requestOrganizerPasscode()
+    const passcode = await requestOrganizerPasscode()
     if (!passcode) {
       setCreationError('An organizer passcode is required to edit a tournament.')
       return
@@ -739,6 +755,7 @@ function App() {
           <p className="fine-print">For an old username-only profile, use Sign up once to set its first password.</p>
         </section>
         <footer>Built for the love of the game.</footer>
+        {passcodePrompt && <OrganizerPasscodeModal onSubmit={submitOrganizerPasscode} onClose={cancelOrganizerPasscode} />}
       </main>
     )
   }
@@ -799,11 +816,12 @@ function App() {
       ) : (
         <section className="page leaderboard" aria-labelledby="leaderboard-title">
           <div className="page-heading"><div><p className="eyebrow">LOCAL RANKINGS</p><h1 id="leaderboard-title">Leaderboard</h1><p>Win matches to earn tournament points.</p></div></div>
-          <div className="rating-note"><span>✦</span><div><strong>Win 250 or 500 points, depending on the tournament tier.</strong><p>Later-round wins are worth more; points update as scores are recorded.</p></div></div>
+          <div className="rating-note"><span>✦</span><div><strong>Win 250 or 500 points, depending on the tournament tier.</strong><p>Later-round wins are worth more; points update as scores are recorded and expire 180 days after the tournament ends.</p></div></div>
           {leaderboardPlayers.length ? <><div className="leaderboard-table">{visibleLeaderboardPlayers.map((player) => <div className="leaderboard-row" key={player.user_id}><span className="leaderboard-rank">{player.rank}</span><span className="mini-avatar">{displayName(player)[0].toUpperCase()}</span><strong>{displayName(player)}</strong><span className="leaderboard-points">{player.total_points} pts</span></div>)}</div>{leaderboardPlayers.length > USERS_PER_PAGE && <div className="pagination"><button className="secondary-action" disabled={leaderboardPage === 1} onClick={() => setLeaderboardPage((page) => page - 1)}>← Previous</button><span>Page {leaderboardPage} of {leaderboardPageCount}</span><button className="secondary-action" disabled={leaderboardPage === leaderboardPageCount} onClick={() => setLeaderboardPage((page) => page + 1)}>Next →</button></div>}</> : <div className="empty-state leaderboard-empty"><div className="trophy">♜</div><h2>The board is waiting</h2><p>Record the first result to begin earning points.</p></div>}
         </section>
       )}
       {scoreMatch && <ScoreEntryModal match={scoreMatch} onClose={() => setScoreMatch(null)} onSave={saveScore} isSaving={isSavingScore} error={scoreError} isSingleSet={tournamentDetail?.tournament?.tournament_tier === 'rally_250'} />}
+      {passcodePrompt && <OrganizerPasscodeModal onSubmit={submitOrganizerPasscode} onClose={cancelOrganizerPasscode} />}
     </main>
   )
 }

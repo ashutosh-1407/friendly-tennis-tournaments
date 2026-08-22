@@ -12,6 +12,7 @@ const tournamentTiers = {
   rally_250: { label: 'Rally 250 · Court Sprint', points: 250, maxPlayers: 16, days: 1, scoring: 'single_set' },
   rally_500: { label: 'Rally 500 · Weekend Classic', points: 500, maxPlayers: 32, days: 2, scoring: 'best_of_three' },
 }
+const pointsExpiryDays = 180
 
 function shuffle(items) {
   const shuffled = [...items]
@@ -110,6 +111,7 @@ function restoreDatabase() {
 
 try {
   if (restoreDatabase()) console.log('Rally data restored from JSON snapshot')
+  refreshUserPoints()
   persistDatabase()
 } catch (error) {
   console.error('Unable to restore or save Rally JSON snapshot:', error.message)
@@ -117,6 +119,13 @@ try {
 
 const app = express()
 app.use(express.json())
+// Ranking points remain valid for 180 days after the tournament finishes.
+// Rebuild the cached totals from the individual tournament awards so expiry is
+// accurate even after a server restart or a long period without activity.
+app.use((_req, _res, next) => {
+  refreshUserPoints()
+  next()
+})
 app.use((req, res, next) => {
   res.on('finish', () => {
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && res.statusCode < 400) persistDatabase()
@@ -641,7 +650,10 @@ function recalculateTournamentPoints(tournamentId) {
   const tournament = db.prepare('SELECT tournament_tier FROM tournaments WHERE id = ?').get(tournamentId)
   const totalPoints = tournamentTiers[tournament?.tournament_tier]?.points || 500
   const fieldSize = db.prepare("SELECT COUNT(*) AS count FROM tournament_players WHERE tournament_id = ? AND registration_status = 'registered'").get(tournamentId).count
-  if (fieldSize < 2) return
+  if (fieldSize < 2) {
+    refreshUserPoints()
+    return
+  }
   const bracketSize = 2 ** Math.ceil(Math.log2(fieldSize))
   const names = { 2: 'Final', 4: 'Semifinals', 8: 'Quarterfinals', 16: 'Round of 16', 32: 'Round of 32' }
   const rounds = []
@@ -660,12 +672,25 @@ function recalculateTournamentPoints(tournamentId) {
   }
   const registrations = db.prepare("SELECT user_id, points_earned FROM tournament_players WHERE tournament_id = ? AND registration_status = 'registered'").all(tournamentId)
   const updateRegistration = db.prepare('UPDATE tournament_players SET points_earned = ? WHERE tournament_id = ? AND user_id = ?')
-  const updateUser = db.prepare('UPDATE users SET total_points = MAX(0, total_points + ?), updated_at = CURRENT_TIMESTAMP WHERE id = ?')
   for (const registration of registrations) {
     const nextPoints = earned.get(registration.user_id) || 0
-    const delta = nextPoints - registration.points_earned
-    if (delta) updateUser.run(delta, registration.user_id)
     updateRegistration.run(nextPoints, tournamentId, registration.user_id)
+  }
+  refreshUserPoints()
+}
+
+function refreshUserPoints() {
+  const expiresBefore = new Date(Date.now() - pointsExpiryDays * 24 * 60 * 60 * 1000).toISOString()
+  const earnedByUser = db.prepare(`SELECT tp.user_id, SUM(tp.points_earned) AS total_points
+    FROM tournament_players tp
+    JOIN tournaments t ON t.id = tp.tournament_id
+    WHERE tp.registration_status = 'registered' AND t.ends_at > ?
+    GROUP BY tp.user_id`).all(expiresBefore)
+  const totals = new Map(earnedByUser.map((row) => [row.user_id, Number(row.total_points) || 0]))
+  const update = db.prepare('UPDATE users SET total_points = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND total_points <> ?')
+  for (const user of db.prepare('SELECT id, total_points FROM users').all()) {
+    const total = totals.get(user.id) || 0
+    if (user.total_points !== total) update.run(total, user.id, total)
   }
 }
 
