@@ -324,7 +324,8 @@ app.patch('/api/weekly-matches/:id', requireUser, (req, res) => {
   const sessionId = Number(req.params.id)
   const session = db.prepare('SELECT * FROM weekly_match_sessions WHERE id = ?').get(sessionId)
   if (!session) return res.status(404).json({ error: 'Weekly match not found.' })
-  if (new Date() >= new Date(session.starts_at)) return res.status(400).json({ error: 'A weekly match cannot be changed after it starts.' })
+  const editingClosesAt = new Date(new Date(session.starts_at).getTime() - 60 * 60 * 1000)
+  if (new Date() >= editingClosesAt) return res.status(400).json({ error: 'Weekly matches can only be edited until one hour before play.' })
   const startsAt = rallyDateTime(String(req.body?.startsAt || ''))
   const requiredPlayers = Number(req.body?.requiredPlayers)
   const courtName = String(req.body?.courtName || '').trim().slice(0, 120)
@@ -381,8 +382,9 @@ app.post('/api/weekly-matches/:id/draw/generate', requireUser, (req, res) => {
   if (!session) return res.status(404).json({ error: 'Weekly match not found.' })
   if (session.draw_generated_at) return res.status(400).json({ error: 'Pairings have already been generated.' })
   const generationOpensAt = new Date(new Date(session.starts_at).getTime() - 60 * 60 * 1000)
+  const generationClosesAt = new Date(new Date(session.starts_at).getTime() + 30 * 60 * 1000)
   if (new Date() < generationOpensAt) return res.status(400).json({ error: 'Random pairings can be generated one hour before play.' })
-  if (new Date() >= new Date(session.starts_at)) return res.status(400).json({ error: 'This weekly match has already started.' })
+  if (new Date() > generationClosesAt) return res.status(400).json({ error: 'Random pairings close 30 minutes after play starts.' })
   const registrations = db.prepare('SELECT user_id FROM weekly_match_registrations WHERE session_id = ? ORDER BY registered_at ASC LIMIT ?').all(sessionId, session.required_players)
   if (registrations.length < 2) return res.status(400).json({ error: 'At least two players are needed to generate pairings.' })
   // With an odd field, the latest registration among the selected players sits out.
@@ -643,7 +645,7 @@ app.get('/api/tournaments/:id', (req, res) => {
   const roundNames = { 2: 'Final', 4: 'Semifinals', 8: 'Quarterfinals', 16: 'Round of 16', 32: 'Round of 32' }
   const rounds = []
   for (let size = bracketSize; size >= 2; size /= 2) rounds.push(roundNames[size] || `Round of ${size}`)
-  const seeds = canViewDraw ? players.filter((player) => player.seed).slice(0, 4) : []
+  const seeds = canViewDraw ? players.filter((player) => player.seed) : []
   res.json({ tournament, players, draw: { visible: publicDrawVisible, visibleAt: visibleAt.toISOString(), organizerPreview, matches, rounds, seeds } })
 })
 
@@ -657,23 +659,30 @@ app.post('/api/tournaments/:id/draw/generate', requireOrganizer, (req, res) => {
   if (playerCount > 32) return res.status(400).json({ error: 'This version supports a maximum of 32 players.' })
   const generate = db.transaction(() => {
     db.prepare('UPDATE tournament_players SET seed = NULL WHERE tournament_id = ?').run(tournamentId)
+    const bracketSize = 2 ** Math.ceil(Math.log2(playerCount))
+    const seedPositionsByBracketSize = {
+      2: [0, 1],
+      4: [0, 2],
+      8: [0, 4],
+      16: [0, 8, 4, 12],
+      32: [0, 16, 8, 24, 4, 12, 20, 28],
+    }
+    const seedPositions = seedPositionsByBracketSize[bracketSize] || []
     const rankedPlayers = db.prepare(`SELECT tp.user_id FROM tournament_players tp
       JOIN users u ON u.id = tp.user_id
-      WHERE tp.tournament_id = ? AND tp.registration_status = 'registered'
+      WHERE tp.tournament_id = ? AND tp.registration_status = 'registered' AND u.total_points > 0
       ORDER BY u.total_points DESC, u.username COLLATE NOCASE ASC`).all(tournamentId)
     const assignSeed = db.prepare('UPDATE tournament_players SET seed = ? WHERE tournament_id = ? AND user_id = ?')
-    rankedPlayers.slice(0, 4).forEach((player, index) => assignSeed.run(index + 1, tournamentId, player.user_id))
+    rankedPlayers.slice(0, seedPositions.length).forEach((player, index) => assignSeed.run(index + 1, tournamentId, player.user_id))
     const players = db.prepare(`SELECT user_id, seed FROM tournament_players
       WHERE tournament_id = ? AND registration_status = 'registered' ORDER BY seed IS NULL, seed, user_id`).all(tournamentId)
-    const bracketSize = 2 ** Math.ceil(Math.log2(players.length))
     const roundNames = { 2: 'Final', 4: 'Semifinals', 8: 'Quarterfinals', 16: 'Round of 16', 32: 'Round of 32' }
     const openingRound = roundNames[bracketSize] || `Round of ${bracketSize}`
     db.prepare('DELETE FROM matches WHERE tournament_id = ?').run(tournamentId)
     db.prepare('DELETE FROM tournament_draw_nodes WHERE tournament_id = ?').run(tournamentId)
     recalculateTournamentPoints(tournamentId)
     const slots = Array(bracketSize).fill(null)
-    const seedPositions = [0, bracketSize / 2, bracketSize / 4, (bracketSize * 3) / 4]
-    const seededPlayers = players.filter((player) => player.seed && player.seed <= 4).sort((left, right) => left.seed - right.seed)
+    const seededPlayers = players.filter((player) => player.seed).sort((left, right) => left.seed - right.seed)
     seededPlayers.forEach((player) => { slots[seedPositions[player.seed - 1]] = player.user_id })
     const byeCount = bracketSize - players.length
     const reservedByeSlots = new Set()
@@ -682,9 +691,8 @@ app.post('/api/tournaments/:id/draw/generate', requireOrganizer, (req, res) => {
       reservedByeSlots.add(position % 2 === 0 ? position + 1 : position - 1)
     })
     const remainingPlayers = shuffle(players.filter((player) => !seededPlayers.some((seeded) => seeded.user_id === player.user_id)).map((player) => player.user_id))
-    slots.forEach((_slot, index) => {
-      if (!slots[index] && !reservedByeSlots.has(index)) slots[index] = remainingPlayers.shift() || null
-    })
+    const openSlotIndexes = shuffle(slots.map((_slot, index) => index).filter((index) => !slots[index] && !reservedByeSlots.has(index)))
+    remainingPlayers.forEach((playerId, index) => { slots[openSlotIndexes[index]] = playerId })
     const insertNode = db.prepare('INSERT INTO tournament_draw_nodes (tournament_id, round_name, match_order, player_one_id, player_two_id) VALUES (?, ?, ?, ?, ?)')
     let roundSize = bracketSize
     let roundIndex = 0
