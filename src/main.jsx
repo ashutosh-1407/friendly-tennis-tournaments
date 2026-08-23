@@ -937,6 +937,7 @@ function App() {
             <div><p className="eyebrow">YOUR COURT CALENDAR</p><h1 id="tournaments-title">Tournaments</h1><p>See what’s happening and keep track of your entries.</p></div>
             {isOrganizer && <button className="primary-action" onClick={() => selectTab('create')}>+ Create tournament</button>}
           </div>
+          <div className="tournament-timing-note" aria-label="Tournament timing rules"><span><strong>Register / withdraw</strong> until 4 days before start</span></div>
           <div className="filter-row" role="tablist" aria-label="Tournament status">
             {['current', 'upcoming', 'past'].map((filter) => <button key={filter} role="tab" aria-selected={tournamentFilter === filter} className={tournamentFilter === filter ? 'selected' : ''} onClick={() => { setTournamentFilter(filter); setNotice(''); setRegistrationError('') }}>{filter[0].toUpperCase() + filter.slice(1)}</button>)}
           </div>
