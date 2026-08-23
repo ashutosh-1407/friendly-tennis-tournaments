@@ -397,7 +397,7 @@ app.post('/api/weekly-matches/:id/draw/generate', requireUser, (req, res) => {
   res.json({ generated: true, selectedPlayers: Math.floor(selectedPlayers.length / 2) * 2 })
 })
 
-app.get('/api/organizer/users', requireOrganizer, (_req, res) => {
+app.get('/api/organizer/users', requireOrganizerAccount, (_req, res) => {
   const users = db.prepare('SELECT id, username, name, total_points FROM users ORDER BY total_points DESC, username COLLATE NOCASE ASC').all()
   res.json({ users })
 })
