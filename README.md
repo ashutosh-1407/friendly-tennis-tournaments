@@ -15,10 +15,11 @@ Your display name is used around Rally when you provide one; otherwise Rally sho
 The **Weekly Matches** page is for casual court sessions.
 
 - Any signed-in player can create a session with its date, time, court, and number of players needed.
-- Register or withdraw until one hour before play.
+- Register, withdraw, or edit until one hour before play.
 - More players can register than there are spots; the earliest registrations fill the available places.
-- During the last hour before play, anyone can generate random pairings.
+- Anyone can generate random pairings from one hour before play until 30 minutes after the session starts.
 - If there is an odd number of selected players, the most recently registered selected player sits out.
+- The organizer can delete a weekly session at any time.
 
 Weekly matches do not award leaderboard points and do not record scores.
 
@@ -38,6 +39,12 @@ Open any tournament card to see the registered players and, when available, its 
 - The card shows remaining capacity and the registration deadline.
 - Before that deadline, the same button becomes **Withdraw** if you are registered.
 - Registration closes four days before the tournament; after that, the player list is final.
+
+### Tournament management timeline
+
+- The organizer can create a tournament at any time.
+- The organizer can generate, publish, unpublish, or reset a draw while a tournament is **Upcoming** or **Current**.
+- The organizer can edit or delete a tournament only while it is **Upcoming**. This closes when it becomes **Current** at midnight on its start date.
 
 ### Tournament formats
 
