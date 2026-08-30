@@ -116,6 +116,43 @@ function TournamentDraw({ draw, isOrganizer, tournamentStatus, drawActionPending
   </div>
 }
 
+function scheduleDateValue(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const pad = (number) => String(number).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+function OrderOfPlay({ matches, isOrganizer, tournamentStatus, savingMatchId, onSave, isAutoScheduling, onAutoSchedule }) {
+  const [drafts, setDrafts] = React.useState({})
+  const scheduledMatches = (matches || []).filter((match) => match.node_id).sort((left, right) => {
+    const leftTime = left.scheduled_at ? new Date(left.scheduled_at).getTime() : Number.MAX_SAFE_INTEGER
+    const rightTime = right.scheduled_at ? new Date(right.scheduled_at).getTime() : Number.MAX_SAFE_INTEGER
+    return leftTime - rightTime || left.round_name.localeCompare(right.round_name) || left.match_order - right.match_order
+  })
+  const updateDraft = (match, field, value) => setDrafts((current) => ({ ...current, [match.node_id]: { scheduledAt: current[match.node_id]?.scheduledAt ?? scheduleDateValue(match.scheduled_at), courtName: current[match.node_id]?.courtName ?? match.court_name ?? '', [field]: value } }))
+  if (!scheduledMatches.length) return <div className="empty-detail"><TennisBall /><p>{isOrganizer ? 'Generate the draw to create an order of play.' : 'The order of play will be available when the draw is published.'}</p></div>
+  return <div className="order-of-play"><div className="order-of-play-heading"><div><p className="eyebrow">COURT SCHEDULE</p><h2>Order of play</h2><p>Automatic scheduling uses 120-minute slots from 9:00 AM, with 30 minutes between rounds and equal rest for potential opponents.</p></div>{isOrganizer && tournamentStatus !== 'past' && <button className="primary-action auto-schedule-button" disabled={isAutoScheduling} onClick={onAutoSchedule}>{isAutoScheduling ? 'Scheduling…' : 'Auto-schedule'}</button>}</div>{scheduledMatches.map((match) => {
+    const draft = drafts[match.node_id] || { scheduledAt: scheduleDateValue(match.scheduled_at), courtName: match.court_name || '' }
+    const playerOne = match.player_one_display_name || match.player_one_name || 'TBD'
+    const playerTwo = match.player_two_display_name || match.player_two_name || 'TBD'
+    const canEdit = isOrganizer && tournamentStatus !== 'past' && Boolean(match.id)
+    return <article className="order-match" key={match.node_id}><div className="order-match-players"><span>{match.round_name}</span><strong>{playerOne} <em>vs</em> {playerTwo}</strong></div>{canEdit ? <div className="order-match-form"><label>Time<input type="datetime-local" value={draft.scheduledAt} onChange={(event) => updateDraft(match, 'scheduledAt', event.target.value)} /></label><label>Court<input value={draft.courtName} onChange={(event) => updateDraft(match, 'courtName', event.target.value)} placeholder="e.g. Court 2" maxLength="80" /></label><button className="secondary-action" disabled={savingMatchId === match.id} onClick={() => onSave(match, draft)}>{savingMatchId === match.id ? 'Saving…' : 'Save'}</button></div> : <div className="order-match-details">{match.scheduled_at ? <span>{new Date(match.scheduled_at).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span> : <span>Time to be announced</span>}{match.court_name && <b>{match.court_name}</b>}</div>}</article>
+  })}</div>
+}
+
+function TournamentOrganizerControls({ players, organizers, pendingUserId, onAssign, onRemove }) {
+  const [selectedUserId, setSelectedUserId] = React.useState('')
+  const [availableUsers, setAvailableUsers] = React.useState([])
+  React.useEffect(() => {
+    fetch('/api/organizer/users').then((response) => response.ok ? response.json() : { users: [] }).then((data) => setAvailableUsers(data.users || [])).catch(() => setAvailableUsers([]))
+  }, [])
+  const organizerIds = new Set((organizers || []).map((organizer) => organizer.id))
+  const eligibleUsers = availableUsers.filter((user) => !organizerIds.has(user.id))
+  return <div className="temporary-organizers"><div><p className="eyebrow">TOURNAMENT TEAM</p><h2>Temporary organizers</h2><p>They can manage this tournament only—draws, scores, byes, and order of play.</p></div><div className="temporary-organizer-list">{organizers?.map((organizer) => <span className="temporary-organizer" key={organizer.id}>{displayName(organizer)}<button disabled={pendingUserId === organizer.id} onClick={() => onRemove(organizer.id)} aria-label={`Remove ${displayName(organizer)} as organizer`}>×</button></span>)}{eligibleUsers.length > 0 && <div className="temporary-organizer-add"><select value={selectedUserId} onChange={(event) => setSelectedUserId(event.target.value)}><option value="">Choose a Rally user…</option>{eligibleUsers.map((user) => <option key={user.id} value={user.id}>{displayName(user)}</option>)}</select><button className="secondary-action" disabled={!selectedUserId || pendingUserId === Number(selectedUserId)} onClick={() => { onAssign(Number(selectedUserId)); setSelectedUserId('') }}>{pendingUserId === Number(selectedUserId) ? 'Saving…' : 'Assign'}</button></div>}</div></div>
+}
+
 function WeeklyMatchesPage({ sessions, isLoading, actionPending, onRegister, onWithdraw, onGenerate, error, notice, onCreate, onEdit, isOrganizer, onDelete }) {
   const generationIsOpen = (session) => {
     const startsAt = new Date(session.starts_at).getTime()
@@ -196,7 +233,11 @@ function App() {
   const [tournamentDetail, setTournamentDetail] = React.useState(null)
   const [detailTab, setDetailTab] = React.useState('players')
   const [detailError, setDetailError] = React.useState('')
+  const [detailNotice, setDetailNotice] = React.useState('')
   const [drawActionPending, setDrawActionPending] = React.useState('')
+  const [schedulingMatchId, setSchedulingMatchId] = React.useState(null)
+  const [isAutoScheduling, setIsAutoScheduling] = React.useState(false)
+  const [organizerActionPending, setOrganizerActionPending] = React.useState(null)
   const [detailVersion, setDetailVersion] = React.useState(0)
   const [scoreMatch, setScoreMatch] = React.useState(null)
   const [scoreError, setScoreError] = React.useState('')
@@ -635,15 +676,15 @@ function App() {
   }, [detailTab, tournamentDetail])
 
   async function manageDraw(action) {
-    const passcode = await requestOrganizerPasscode()
-    if (!passcode) {
+    const passcode = isOrganizer ? await requestOrganizerPasscode() : ''
+    if (isOrganizer && !passcode) {
       setDetailError('An organizer passcode is required to manage the draw.')
       return
     }
     setDetailError('')
     setDrawActionPending(action)
     try {
-      const response = await fetch(`/api/tournaments/${selectedTournamentId}/draw/${action}`, { method: 'POST', headers: { 'x-rally-username': username, 'x-rally-organizer-passcode': passcode } })
+      const response = await fetch(`/api/tournaments/${selectedTournamentId}/draw/${action}`, { method: 'POST', headers: { 'x-rally-username': username, ...(passcode ? { 'x-rally-organizer-passcode': passcode } : {}) } })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Unable to update the draw.')
       setDetailVersion((version) => version + 1)
@@ -654,9 +695,58 @@ function App() {
     }
   }
 
-  async function awardBye(match, winnerUserId) {
+  async function saveMatchSchedule(match, draft) {
+    const passcode = isOrganizer ? await requestOrganizerPasscode() : ''
+    if (isOrganizer && !passcode) { setDetailError('An organizer passcode is required to set the order of play.'); return }
+    setDetailError('')
+    setSchedulingMatchId(match.id)
+    try {
+      const response = await fetch(`/api/matches/${match.id}/schedule`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...(passcode ? { 'x-rally-organizer-passcode': passcode } : {}) },
+        body: JSON.stringify(draft),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Unable to save match schedule.')
+      setDetailVersion((version) => version + 1)
+    } catch (error) { setDetailError(error.message) } finally { setSchedulingMatchId(null) }
+  }
+
+  async function autoScheduleOrderOfPlay() {
+    const passcode = isOrganizer ? await requestOrganizerPasscode() : ''
+    if (!selectedTournamentId || (isOrganizer && !passcode)) { setDetailError('An organizer passcode is required to auto-schedule the draw.'); return }
+    setDetailError('')
+    setDetailNotice('')
+    setIsAutoScheduling(true)
+    try {
+      const response = await fetch(`/api/tournaments/${selectedTournamentId}/order-of-play/auto-schedule`, { method: 'POST', headers: passcode ? { 'x-rally-organizer-passcode': passcode } : {} })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Unable to auto-schedule the draw.')
+      setDetailNotice(`Order of play updated: ${data.courtCount} courts, ${data.startTime} start, ${data.slotMinutes}-minute slots, and ${data.restMinutes}-minute recovery between rounds.`)
+      setDetailVersion((version) => version + 1)
+    } catch (error) { setDetailError(error.message) } finally { setIsAutoScheduling(false) }
+  }
+
+  async function updateTournamentOrganizer(userId, action) {
     const passcode = await requestOrganizerPasscode()
-    if (!passcode) {
+    if (!passcode || !selectedTournamentId) { setDetailError('An organizer passcode is required to update the tournament team.'); return }
+    setDetailError('')
+    setOrganizerActionPending(userId)
+    try {
+      const response = await fetch(`/api/tournaments/${selectedTournamentId}/organizers${action === 'remove' ? `/${userId}` : ''}`, {
+        method: action === 'remove' ? 'DELETE' : 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-rally-organizer-passcode': passcode },
+        body: action === 'remove' ? undefined : JSON.stringify({ userId }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Unable to update the tournament team.')
+      setDetailVersion((version) => version + 1)
+    } catch (error) { setDetailError(error.message) } finally { setOrganizerActionPending(null) }
+  }
+
+  async function awardBye(match, winnerUserId) {
+    const passcode = isOrganizer ? await requestOrganizerPasscode() : ''
+    if (isOrganizer && !passcode) {
       setDetailError('An organizer passcode is required to award a bye.')
       return
     }
@@ -665,7 +755,7 @@ function App() {
     try {
       const response = await fetch(`/api/matches/${match.id}/bye`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-rally-username': username, 'x-rally-organizer-passcode': passcode },
+        headers: { 'Content-Type': 'application/json', 'x-rally-username': username, ...(passcode ? { 'x-rally-organizer-passcode': passcode } : {}) },
         body: JSON.stringify({ winnerUserId }),
       })
       const data = await response.json()
@@ -687,7 +777,7 @@ function App() {
     if (!scoreMatch) return
     const isMatchPlayer = [scoreMatch.player_one_name, scoreMatch.player_two_name].some((player) => player.toLowerCase() === username.toLowerCase())
     const isScoreOverride = scoreMatch.status === 'completed'
-    const passcode = isOrganizer && (isScoreOverride || !isMatchPlayer) ? await requestOrganizerPasscode() : organizerPasscode
+    const passcode = isOrganizer && (isScoreOverride || !isMatchPlayer) ? await requestOrganizerPasscode() : ''
     if (isOrganizer && (isScoreOverride || !isMatchPlayer) && !passcode) {
       setScoreError(isScoreOverride ? 'An organizer passcode is required to change a submitted score.' : 'An organizer passcode is required to enter another player’s score.')
       return
@@ -910,7 +1000,8 @@ function App() {
         <section className="page detail-page" aria-labelledby="tournament-detail-title">
           <button className="back-button" onClick={() => selectTab('tournaments')}>← Back to tournaments</button>
           {detailError && <p className="creation-error" role="alert">{detailError}</p>}
-          {!tournamentDetail ? <p className="detail-loading">Loading tournament…</p> : <><div className="detail-heading"><p className="eyebrow">{new Date(tournamentDetail.tournament.starts_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })} · {TOURNAMENT_TIERS[tournamentDetail.tournament.tournament_tier]?.label || 'Rally 500 · Weekend Classic'} · {tournamentDetail.tournament.location || 'Location to be announced'}</p><div className="detail-title-row"><h1 id="tournament-detail-title">{tournamentDetail.tournament.name}</h1>{isOrganizer && tournamentDetail.tournament.status === 'upcoming' && <div className="management-icons"><button className="icon-action" onClick={() => openTournamentEdit(tournamentDetail.tournament)} aria-label="Edit tournament" title="Edit tournament"><EditIcon /></button><button className="icon-action icon-action--delete" disabled={isDeletingTournament} onClick={() => deleteTournament(tournamentDetail.tournament)} aria-label="Delete tournament" title="Delete tournament"><TrashIcon /></button></div>}</div>{tournamentDetail.tournament.description && <p>{tournamentDetail.tournament.description}</p>}</div><div className="detail-tabs"><button className={detailTab === 'players' ? 'active' : ''} onClick={() => setDetailTab('players')}>Players <span>{tournamentDetail.players.length}</span></button><button className={detailTab === 'draw' ? 'active' : ''} onClick={() => setDetailTab('draw')}>Draw</button></div>{detailTab === 'players' ? <div className="player-panel">{tournamentDetail.players.length ? tournamentDetail.players.map((player, index) => <div className="player-row" key={player.id}><span className="player-number">{index + 1}</span><span className="mini-avatar">{displayName(player)[0].toUpperCase()}</span><strong>{displayName(player)}</strong>{player.seed && <span className="seed">Seed {player.seed}</span>}</div>) : <div className="empty-detail"><TennisBall /><p>No players registered yet.</p></div>}</div> : <TournamentDraw draw={tournamentDetail.draw} isOrganizer={isOrganizer} tournamentStatus={tournamentDetail.tournament.status} drawActionPending={drawActionPending} onManage={manageDraw} userId={userId} onEnterScore={openScore} onAwardBye={awardBye} />}</>}
+          {detailNotice && <div className="notice" role="status">{detailNotice}</div>}
+          {!tournamentDetail ? <p className="detail-loading">Loading tournament…</p> : <><div className="detail-heading"><p className="eyebrow">{new Date(tournamentDetail.tournament.starts_at).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })} · {TOURNAMENT_TIERS[tournamentDetail.tournament.tournament_tier]?.label || 'Rally 500 · Weekend Classic'} · {tournamentDetail.tournament.location || 'Location to be announced'}</p><div className="detail-title-row"><h1 id="tournament-detail-title">{tournamentDetail.tournament.name}</h1>{isOrganizer && tournamentDetail.tournament.status === 'upcoming' && <div className="management-icons"><button className="icon-action" onClick={() => openTournamentEdit(tournamentDetail.tournament)} aria-label="Edit tournament" title="Edit tournament"><EditIcon /></button><button className="icon-action icon-action--delete" disabled={isDeletingTournament} onClick={() => deleteTournament(tournamentDetail.tournament)} aria-label="Delete tournament" title="Delete tournament"><TrashIcon /></button></div>}</div>{tournamentDetail.tournament.description && <p>{tournamentDetail.tournament.description}</p>}</div>{isOrganizer && <TournamentOrganizerControls players={tournamentDetail.players} organizers={tournamentDetail.organizers} pendingUserId={organizerActionPending} onAssign={(userId) => updateTournamentOrganizer(userId, 'assign')} onRemove={(userId) => updateTournamentOrganizer(userId, 'remove')} />}<div className="detail-tabs"><button className={detailTab === 'players' ? 'active' : ''} onClick={() => setDetailTab('players')}>Players <span>{tournamentDetail.players.length}</span></button><button className={detailTab === 'draw' ? 'active' : ''} onClick={() => setDetailTab('draw')}>Draw</button><button className={detailTab === 'schedule' ? 'active' : ''} onClick={() => setDetailTab('schedule')}>Order of play</button></div>{detailTab === 'players' ? <div className="player-panel">{tournamentDetail.players.length ? tournamentDetail.players.map((player, index) => <div className="player-row" key={player.id}><span className="player-number">{index + 1}</span><span className="mini-avatar">{displayName(player)[0].toUpperCase()}</span><strong>{displayName(player)}</strong>{player.seed && <span className="seed">Seed {player.seed}</span>}</div>) : <div className="empty-detail"><TennisBall /><p>No players registered yet.</p></div>}</div> : detailTab === 'schedule' ? <OrderOfPlay matches={tournamentDetail.draw.matches} isOrganizer={tournamentDetail.management?.canManage} tournamentStatus={tournamentDetail.tournament.status} savingMatchId={schedulingMatchId} onSave={saveMatchSchedule} isAutoScheduling={isAutoScheduling} onAutoSchedule={autoScheduleOrderOfPlay} /> : <TournamentDraw draw={tournamentDetail.draw} isOrganizer={tournamentDetail.management?.canManage} tournamentStatus={tournamentDetail.tournament.status} drawActionPending={drawActionPending} onManage={manageDraw} userId={userId} onEnterScore={openScore} onAwardBye={awardBye} />}</>}
         </section>
       ) : ['create', 'edit-tournament'].includes(activeTab) && isOrganizer ? (
         <section className="page create-page" aria-labelledby="create-title">
@@ -937,7 +1028,7 @@ function App() {
             <div><p className="eyebrow">YOUR COURT CALENDAR</p><h1 id="tournaments-title">Tournaments</h1><p>See what’s happening and keep track of your entries.</p></div>
             {isOrganizer && <button className="primary-action" onClick={() => selectTab('create')}>+ Create tournament</button>}
           </div>
-          {tournaments.length > 0 && <div className="tournament-timing-note" aria-label="Tournament timing rules"><span><strong>Register / withdraw</strong> until 4 days before start</span></div>}
+          {tournamentFilter === 'upcoming' && tournaments.length > 0 && <div className="tournament-timing-note" aria-label="Tournament timing rules"><span><strong>Register / withdraw</strong> until 4 days before start</span></div>}
           <div className="filter-row" role="tablist" aria-label="Tournament status">
             {['current', 'upcoming', 'past'].map((filter) => <button key={filter} role="tab" aria-selected={tournamentFilter === filter} className={tournamentFilter === filter ? 'selected' : ''} onClick={() => { setTournamentFilter(filter); setNotice(''); setRegistrationError('') }}>{filter[0].toUpperCase() + filter.slice(1)}</button>)}
           </div>

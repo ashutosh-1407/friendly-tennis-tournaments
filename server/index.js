@@ -15,6 +15,8 @@ const tournamentTiers = {
   rally_500: { label: 'Rally 500 · Weekend Classic', points: 500, maxPlayers: 32, days: 2, scoring: 'best_of_three' },
 }
 const pointsExpiryDays = 180
+// Change these defaults in one place if Rally's usual play window changes.
+const orderOfPlayDefaults = { startTime: '09:00', slotMinutes: 120, restMinutes: 30, courtsByBracketSize: { 8: 2, 16: 4, 32: 4 } }
 
 function shuffle(items) {
   const shuffled = [...items]
@@ -53,10 +55,19 @@ if (!db.prepare("SELECT 1 FROM pragma_table_info('weekly_match_sessions') WHERE 
 if (!db.prepare("SELECT 1 FROM pragma_table_info('weekly_match_sessions') WHERE name = 'court_numbers'").get()) {
   db.exec('ALTER TABLE weekly_match_sessions ADD COLUMN court_numbers TEXT')
 }
+if (!db.prepare("SELECT 1 FROM pragma_table_info('matches') WHERE name = 'court_name'").get()) {
+  db.exec('ALTER TABLE matches ADD COLUMN court_name TEXT')
+}
+if (!db.prepare("SELECT 1 FROM pragma_table_info('tournament_draw_nodes') WHERE name = 'scheduled_at'").get()) {
+  db.exec('ALTER TABLE tournament_draw_nodes ADD COLUMN scheduled_at TEXT')
+}
+if (!db.prepare("SELECT 1 FROM pragma_table_info('tournament_draw_nodes') WHERE name = 'court_name'").get()) {
+  db.exec('ALTER TABLE tournament_draw_nodes ADD COLUMN court_name TEXT')
+}
 
 const snapshotPath = path.join(dataDirectory, 'rally.json')
 const bundledSnapshotPath = path.join(bundledDataDirectory, 'rally.json')
-const snapshotTables = ['users', 'access_requests', 'signup_invites', 'tournaments', 'tournament_players', 'tournament_draw_nodes', 'matches', 'match_results', 'weekly_match_sessions', 'weekly_match_registrations', 'weekly_match_pairings', 'sessions']
+const snapshotTables = ['users', 'access_requests', 'signup_invites', 'tournaments', 'tournament_players', 'tournament_organizers', 'tournament_draw_nodes', 'matches', 'match_results', 'weekly_match_sessions', 'weekly_match_registrations', 'weekly_match_pairings', 'sessions']
 
 // A new Railway Volume starts empty. Seed it once from the deployed snapshot,
 // then all later changes are saved only on the persistent Volume.
@@ -101,7 +112,7 @@ function restoreDatabase() {
   if (!fs.existsSync(snapshotPath)) return false
   const snapshot = JSON.parse(fs.readFileSync(snapshotPath, 'utf8'))
   const restore = db.transaction(() => {
-    db.exec('DELETE FROM sessions; DELETE FROM signup_invites; DELETE FROM access_requests; DELETE FROM match_results; DELETE FROM matches; DELETE FROM tournament_draw_nodes; DELETE FROM tournament_players; DELETE FROM weekly_match_pairings; DELETE FROM weekly_match_registrations; DELETE FROM weekly_match_sessions; DELETE FROM tournaments; DELETE FROM users;')
+    db.exec('DELETE FROM sessions; DELETE FROM signup_invites; DELETE FROM access_requests; DELETE FROM match_results; DELETE FROM matches; DELETE FROM tournament_draw_nodes; DELETE FROM tournament_organizers; DELETE FROM tournament_players; DELETE FROM weekly_match_pairings; DELETE FROM weekly_match_registrations; DELETE FROM weekly_match_sessions; DELETE FROM tournaments; DELETE FROM users;')
     for (const table of snapshotTables) {
       const rows = Array.isArray(snapshot[table]) ? snapshot[table] : []
       if (!rows.length) continue
@@ -413,11 +424,12 @@ app.delete('/api/organizer/users/:id', requireOrganizer, (req, res) => {
   const hasRecordedTournamentData = db.prepare(`SELECT 1 FROM matches WHERE player_one_id = ? OR player_two_id = ?
     UNION SELECT 1 FROM match_results WHERE winner_user_id = ?
     UNION SELECT 1 FROM tournament_draw_nodes WHERE player_one_id = ? OR player_two_id = ? OR winner_user_id = ?
+    UNION SELECT 1 FROM tournament_organizers WHERE user_id = ? OR assigned_by_user_id = ?
     UNION SELECT 1 FROM tournaments WHERE created_by_user_id = ?
     UNION SELECT 1 FROM weekly_match_sessions WHERE created_by_user_id = ?
     UNION SELECT 1 FROM weekly_match_pairings WHERE player_one_id = ? OR player_two_id = ?
     UNION SELECT 1 FROM signup_invites WHERE created_by_user_id = ?
-    LIMIT 1`).get(userId, userId, userId, userId, userId, userId, userId, userId, userId, userId, userId)
+    LIMIT 1`).get(userId, userId, userId, userId, userId, userId, userId, userId, userId, userId, userId, userId, userId)
   if (hasRecordedTournamentData) return res.status(409).json({ error: 'This user has tournament or weekly-match history and cannot be deleted.' })
 
   db.prepare('DELETE FROM users WHERE id = ?').run(userId)
@@ -441,6 +453,25 @@ function isOrganizer(req) {
 
 function isOrganizerAccount(req) {
   return req.authUser?.username?.toLowerCase() === organizerUsername
+}
+
+function isTournamentManager(req, tournamentId) {
+  if (isOrganizer(req)) return true
+  return Boolean(req.authUser && db.prepare('SELECT 1 FROM tournament_organizers WHERE tournament_id = ? AND user_id = ?').get(tournamentId, req.authUser.id))
+}
+
+function requireTournamentManager(req, res, next) {
+  const tournamentId = Number(req.params.id)
+  if (!req.authUser) return res.status(401).json({ error: 'Please sign in to manage this tournament.' })
+  if (!isTournamentManager(req, tournamentId)) return res.status(403).json({ error: 'You are not an organizer for this tournament.' })
+  next()
+}
+
+function requireTournamentManagerForMatch(req, res, next) {
+  const tournamentId = db.prepare('SELECT tournament_id FROM matches WHERE id = ?').get(Number(req.params.id))?.tournament_id
+  if (!req.authUser) return res.status(401).json({ error: 'Please sign in to manage this tournament.' })
+  if (!tournamentId || !isTournamentManager(req, tournamentId)) return res.status(403).json({ error: 'You are not an organizer for this tournament.' })
+  next()
 }
 
 function requireOrganizerAccount(req, res, next) {
@@ -544,19 +575,44 @@ app.delete('/api/tournaments/:id', requireOrganizer, (req, res) => {
   res.json({ deleted: true, name: tournament.name })
 })
 
+app.post('/api/tournaments/:id/organizers', requireOrganizer, (req, res) => {
+  const tournamentId = Number(req.params.id)
+  const userId = Number(req.body?.userId)
+  const tournament = db.prepare('SELECT id, status FROM tournaments WHERE id = ?').get(tournamentId)
+  if (!tournament) return res.status(404).json({ error: 'Tournament not found.' })
+  if (tournament.status === 'past') return res.status(400).json({ error: 'Past tournaments cannot be assigned a new organizer.' })
+  if (!Number.isInteger(userId) || userId < 1) return res.status(400).json({ error: 'Choose a valid player.' })
+  const user = db.prepare('SELECT id FROM users WHERE id = ?').get(userId)
+  if (!user) return res.status(404).json({ error: 'User not found.' })
+  if (userId === req.authUser.id) return res.status(400).json({ error: 'You are already the permanent organizer.' })
+  db.prepare('INSERT OR IGNORE INTO tournament_organizers (tournament_id, user_id, assigned_by_user_id) VALUES (?, ?, ?)').run(tournamentId, userId, req.authUser.id)
+  res.status(201).json({ assigned: true })
+})
+
+app.delete('/api/tournaments/:id/organizers/:userId', requireOrganizer, (req, res) => {
+  const tournamentId = Number(req.params.id)
+  const userId = Number(req.params.userId)
+  db.prepare('DELETE FROM tournament_organizers WHERE tournament_id = ? AND user_id = ?').run(tournamentId, userId)
+  res.json({ removed: true })
+})
+
 app.get('/api/tournaments', (req, res) => {
   const status = req.query.status
   const userId = req.authUser?.id || 0
   const organizerViewing = req.authUser?.username?.toLowerCase() === organizerUsername
   const validStatuses = ['upcoming', 'current', 'past']
-  let query = "SELECT t.*, tp.registration_status, EXISTS(SELECT 1 FROM matches m WHERE m.tournament_id = t.id) AS draw_generated, (SELECT COUNT(*) FROM tournament_players registered WHERE registered.tournament_id = t.id AND registered.registration_status = 'registered') AS registered_count FROM tournaments t"
+  let query = "SELECT t.*, tp.registration_status, EXISTS(SELECT 1 FROM tournament_organizers manager WHERE manager.tournament_id = t.id AND manager.user_id = ?) AS temporary_manager, EXISTS(SELECT 1 FROM matches m WHERE m.tournament_id = t.id) AS draw_generated, (SELECT COUNT(*) FROM tournament_players registered WHERE registered.tournament_id = t.id AND registered.registration_status = 'registered') AS registered_count FROM tournaments t"
   const params = []
+  params.push(userId)
   if (Number.isInteger(userId) && userId > 0) { query += ' LEFT JOIN tournament_players tp ON tp.tournament_id = t.id AND tp.user_id = ?'; params.push(userId) }
   else query += ' LEFT JOIN tournament_players tp ON 1 = 0'
   if (status === 'registered' && Number.isInteger(userId) && userId > 0) query += " WHERE tp.registration_status = 'registered'"
   else if (validStatuses.includes(status)) { query += ' WHERE t.status = ?'; params.push(status) }
   if (['current', 'past'].includes(status) && !organizerViewing) {
-    if (Number.isInteger(userId) && userId > 0) query += " AND tp.registration_status = 'registered'"
+    if (Number.isInteger(userId) && userId > 0) {
+      query += " AND (tp.registration_status = 'registered' OR EXISTS(SELECT 1 FROM tournament_organizers manager WHERE manager.tournament_id = t.id AND manager.user_id = ?))"
+      params.push(userId)
+    }
     else query += ' AND 1 = 0'
   }
   res.json({ tournaments: db.prepare(`${query} ORDER BY t.starts_at ASC`).all(...params) })
@@ -616,10 +672,14 @@ app.get('/api/tournaments/:id', (req, res) => {
   // The signed-in organizer may preview an unpublished bracket. Changing it
   // (generate, publish, undo, or scoring another player's match) still needs
   // the separate organizer passcode through requireOrganizer.
-  const organizerPreview = isOrganizerAccount(req)
-  const canViewDraw = publicDrawVisible || organizerPreview
+  const temporaryManager = Boolean(req.authUser && db.prepare('SELECT 1 FROM tournament_organizers WHERE tournament_id = ? AND user_id = ?').get(tournamentId, req.authUser.id))
+  const canManageTournament = isOrganizerAccount(req) || temporaryManager
+  const canViewDraw = publicDrawVisible || canManageTournament
+  const organizers = db.prepare(`SELECT u.id, u.username, u.name FROM tournament_organizers manager
+    JOIN users u ON u.id = manager.user_id WHERE manager.tournament_id = ? ORDER BY manager.assigned_at`).all(tournamentId)
+  const availableOrganizers = isOrganizerAccount(req) ? db.prepare('SELECT id, username, name FROM users WHERE username <> ? ORDER BY name IS NULL, name COLLATE NOCASE, username COLLATE NOCASE').all(organizerUsername) : []
   const hasDrawNodes = Boolean(db.prepare('SELECT 1 FROM tournament_draw_nodes WHERE tournament_id = ? LIMIT 1').get(tournamentId))
-  const matches = canViewDraw ? (hasDrawNodes ? db.prepare(`SELECT m.id, n.id AS node_id, n.tournament_id, n.round_name, n.match_order, n.player_one_id, n.player_two_id,
+  const matches = canViewDraw ? (hasDrawNodes ? db.prepare(`SELECT m.id, COALESCE(m.scheduled_at, n.scheduled_at) AS scheduled_at, COALESCE(m.court_name, n.court_name) AS court_name, n.id AS node_id, n.tournament_id, n.round_name, n.match_order, n.player_one_id, n.player_two_id,
       COALESCE(m.status, CASE WHEN n.winner_user_id IS NOT NULL THEN 'completed' ELSE 'scheduled' END) AS status,
       p1.username AS player_one_name, p2.username AS player_two_name, p1.name AS player_one_display_name, p2.name AS player_two_display_name,
       tp1.seed AS player_one_seed, tp2.seed AS player_two_seed,
@@ -646,10 +706,10 @@ app.get('/api/tournaments/:id', (req, res) => {
   const rounds = []
   for (let size = bracketSize; size >= 2; size /= 2) rounds.push(roundNames[size] || `Round of ${size}`)
   const seeds = canViewDraw ? players.filter((player) => player.seed) : []
-  res.json({ tournament, players, draw: { visible: publicDrawVisible, visibleAt: visibleAt.toISOString(), organizerPreview, matches, rounds, seeds } })
+  res.json({ tournament, players, organizers, availableOrganizers, management: { canManage: canManageTournament, canAssign: isOrganizerAccount(req) }, draw: { visible: publicDrawVisible, visibleAt: visibleAt.toISOString(), organizerPreview: canManageTournament, matches, rounds, seeds } })
 })
 
-app.post('/api/tournaments/:id/draw/generate', requireOrganizer, (req, res) => {
+app.post('/api/tournaments/:id/draw/generate', requireTournamentManager, (req, res) => {
   const tournamentId = Number(req.params.id)
   const tournament = db.prepare('SELECT id, status FROM tournaments WHERE id = ?').get(tournamentId)
   if (!tournament) return res.status(404).json({ error: 'Tournament not found.' })
@@ -713,7 +773,7 @@ app.post('/api/tournaments/:id/draw/generate', requireOrganizer, (req, res) => {
   res.json(generate())
 })
 
-app.post('/api/tournaments/:id/draw/publish', requireOrganizer, (req, res) => {
+app.post('/api/tournaments/:id/draw/publish', requireTournamentManager, (req, res) => {
   const tournament = db.prepare('SELECT status FROM tournaments WHERE id = ?').get(Number(req.params.id))
   if (!tournament) return res.status(404).json({ error: 'Tournament not found.' })
   if (tournament.status === 'past') return res.status(400).json({ error: 'Draws cannot be published for past tournaments.' })
@@ -723,7 +783,7 @@ app.post('/api/tournaments/:id/draw/publish', requireOrganizer, (req, res) => {
   res.json({ published: true })
 })
 
-app.post('/api/tournaments/:id/draw/unpublish', requireOrganizer, (req, res) => {
+app.post('/api/tournaments/:id/draw/unpublish', requireTournamentManager, (req, res) => {
   const tournament = db.prepare('SELECT status FROM tournaments WHERE id = ?').get(Number(req.params.id))
   if (!tournament) return res.status(404).json({ error: 'Tournament not found.' })
   if (tournament.status === 'past') return res.status(400).json({ error: 'Draws cannot be changed for past tournaments.' })
@@ -731,7 +791,7 @@ app.post('/api/tournaments/:id/draw/unpublish', requireOrganizer, (req, res) => 
   res.json({ published: false })
 })
 
-app.post('/api/tournaments/:id/draw/reset', requireOrganizer, (req, res) => {
+app.post('/api/tournaments/:id/draw/reset', requireTournamentManager, (req, res) => {
   const tournament = db.prepare('SELECT id, status FROM tournaments WHERE id = ?').get(Number(req.params.id))
   if (!tournament) return res.status(404).json({ error: 'Tournament not found.' })
   if (tournament.status === 'past') return res.status(400).json({ error: 'Draws cannot be changed for past tournaments.' })
@@ -782,12 +842,13 @@ function advanceWinner(match, winnerUserId) {
   const nextOrder = Math.ceil(match.match_order / 2)
   const playerOneId = match.match_order % 2 === 1 ? winnerUserId : pairedWinner.winner_user_id
   const playerTwoId = match.match_order % 2 === 1 ? pairedWinner.winner_user_id : winnerUserId
+  const nextNode = db.prepare('SELECT scheduled_at, court_name FROM tournament_draw_nodes WHERE tournament_id = ? AND round_name = ? AND match_order = ?').get(match.tournament_id, nextRound, nextOrder)
   const existingNext = db.prepare('SELECT id, status FROM matches WHERE tournament_id = ? AND round_name = ? AND match_order = ?').get(match.tournament_id, nextRound, nextOrder)
   if (existingNext?.status === 'completed') return
   if (existingNext) {
     db.prepare('UPDATE matches SET player_one_id = ?, player_two_id = ? WHERE id = ?').run(playerOneId, playerTwoId, existingNext.id)
   } else {
-    db.prepare('INSERT INTO matches (tournament_id, round_name, match_order, player_one_id, player_two_id) VALUES (?, ?, ?, ?, ?)').run(match.tournament_id, nextRound, nextOrder, playerOneId, playerTwoId)
+    db.prepare('INSERT INTO matches (tournament_id, round_name, match_order, player_one_id, player_two_id, scheduled_at, court_name) VALUES (?, ?, ?, ?, ?, ?, ?)').run(match.tournament_id, nextRound, nextOrder, playerOneId, playerTwoId, nextNode?.scheduled_at || null, nextNode?.court_name || null)
   }
 }
 
@@ -802,7 +863,7 @@ function resolveDrawNodes(tournamentId) {
   const updateNode = db.prepare('UPDATE tournament_draw_nodes SET player_one_id = ?, player_two_id = ?, winner_user_id = ? WHERE id = ?')
   const findMatch = db.prepare('SELECT id FROM matches WHERE tournament_id = ? AND round_name = ? AND match_order = ?')
   const updateMatchPlayers = db.prepare('UPDATE matches SET player_one_id = ?, player_two_id = ? WHERE id = ? AND status != \'completed\'')
-  const insertMatch = db.prepare('INSERT INTO matches (tournament_id, round_name, match_order, player_one_id, player_two_id) VALUES (?, ?, ?, ?, ?)')
+  const insertMatch = db.prepare('INSERT INTO matches (tournament_id, round_name, match_order, player_one_id, player_two_id, scheduled_at, court_name) VALUES (?, ?, ?, ?, ?, ?, ?)')
   const isResolved = (node) => Boolean(node.winner_user_id) || (!node.player_one_id && !node.player_two_id)
 
   for (let roundIndex = 0; roundIndex < rounds.length; roundIndex += 1) {
@@ -829,7 +890,7 @@ function resolveDrawNodes(tournamentId) {
       if (!winner && one && two) {
         const existingMatch = findMatch.get(tournamentId, node.round_name, node.match_order)
         if (existingMatch) updateMatchPlayers.run(one, two, existingMatch.id)
-        else insertMatch.run(tournamentId, node.round_name, node.match_order, one, two)
+        else insertMatch.run(tournamentId, node.round_name, node.match_order, one, two, node.scheduled_at || null, node.court_name || null)
       }
     }
   }
@@ -928,9 +989,10 @@ app.post('/api/matches/:id/result', requireUser, (req, res) => {
   const tournament = db.prepare('SELECT status, tournament_tier FROM tournaments WHERE id = ?').get(match.tournament_id)
   if (tournament?.status !== 'current') return res.status(400).json({ error: 'Scores can only be entered for current tournaments.' })
   const user = req.authUser
-  if (!user || (!isOrganizer(req) && user.id !== match.player_one_id && user.id !== match.player_two_id)) return res.status(403).json({ error: 'Only a player in this match or the organizer can enter its score.' })
+  const tournamentManager = isTournamentManager(req, match.tournament_id)
+  if (!user || (!tournamentManager && user.id !== match.player_one_id && user.id !== match.player_two_id)) return res.status(403).json({ error: 'Only a player in this match or the tournament organizer can enter its score.' })
   const existingResult = db.prepare('SELECT 1 FROM match_results WHERE match_id = ?').get(match.id)
-  if (existingResult && !isOrganizer(req)) return res.status(409).json({ error: 'This score has already been submitted. Only the organizer can change it.' })
+  if (existingResult && !tournamentManager) return res.status(409).json({ error: 'This score has already been submitted. Only the tournament organizer can change it.' })
   const sets = Array.isArray(req.body?.sets) ? req.body.sets : []
   const isSingleSet = tournament.tournament_tier === 'rally_250'
   if (isSingleSet && (sets.length !== 1 || !validStandardSet(sets[0]))) return res.status(400).json({ error: 'Enter one valid tennis set score.' })
@@ -980,7 +1042,7 @@ app.post('/api/matches/:id/result', requireUser, (req, res) => {
   res.json({ completed: true, winnerUserId })
 })
 
-app.post('/api/matches/:id/bye', requireOrganizer, (req, res) => {
+app.post('/api/matches/:id/bye', requireTournamentManagerForMatch, (req, res) => {
   const match = db.prepare('SELECT * FROM matches WHERE id = ?').get(Number(req.params.id))
   if (!match) return res.status(404).json({ error: 'Match not found.' })
   const tournament = db.prepare('SELECT status FROM tournaments WHERE id = ?').get(match.tournament_id)
@@ -999,6 +1061,71 @@ app.post('/api/matches/:id/bye', requireOrganizer, (req, res) => {
   })
   saveBye()
   res.json({ completed: true, winnerUserId, bye: true })
+})
+
+app.patch('/api/matches/:id/schedule', requireTournamentManagerForMatch, (req, res) => {
+  const matchId = Number(req.params.id)
+  const match = db.prepare(`SELECT m.*, t.starts_at, t.ends_at, t.status AS tournament_status
+    FROM matches m JOIN tournaments t ON t.id = m.tournament_id WHERE m.id = ?`).get(matchId)
+  if (!match) return res.status(404).json({ error: 'Match not found.' })
+  if (match.tournament_status === 'past') return res.status(400).json({ error: 'Past tournament matches cannot be rescheduled.' })
+  const scheduledAt = rallyDateTime(String(req.body?.scheduledAt || ''))
+  const courtName = String(req.body?.courtName || '').trim().slice(0, 80)
+  if (Number.isNaN(scheduledAt.getTime())) return res.status(400).json({ error: 'Choose a valid match date and time.' })
+  if (!courtName) return res.status(400).json({ error: 'Enter a court name or number.' })
+  if (scheduledAt < new Date(match.starts_at) || scheduledAt > new Date(match.ends_at)) return res.status(400).json({ error: 'Schedule the match within the tournament dates.' })
+  db.transaction(() => {
+    db.prepare('UPDATE matches SET scheduled_at = ?, court_name = ? WHERE id = ?').run(scheduledAt.toISOString(), courtName, matchId)
+    db.prepare('UPDATE tournament_draw_nodes SET scheduled_at = ?, court_name = ? WHERE tournament_id = ? AND round_name = ? AND match_order = ?').run(scheduledAt.toISOString(), courtName, match.tournament_id, match.round_name, match.match_order)
+  })()
+  res.json({ scheduled: true, scheduledAt: scheduledAt.toISOString(), courtName })
+})
+
+app.post('/api/tournaments/:id/order-of-play/auto-schedule', requireTournamentManager, (req, res) => {
+  const tournamentId = Number(req.params.id)
+  const tournament = db.prepare('SELECT id, starts_at, ends_at, status FROM tournaments WHERE id = ?').get(tournamentId)
+  if (!tournament) return res.status(404).json({ error: 'Tournament not found.' })
+  if (tournament.status === 'past') return res.status(400).json({ error: 'Past tournaments cannot be scheduled.' })
+  const nodes = db.prepare('SELECT id, round_name, match_order FROM tournament_draw_nodes WHERE tournament_id = ? ORDER BY match_order').all(tournamentId)
+  if (!nodes.length) return res.status(400).json({ error: 'Generate a draw before creating an order of play.' })
+  const rounds = [...new Set(nodes.map((node) => node.round_name))].sort((left, right) => nodes.filter((node) => node.round_name === right).length - nodes.filter((node) => node.round_name === left).length)
+  const openingNodes = nodes.filter((node) => node.round_name === rounds[0])
+  const bracketSize = openingNodes.length * 2
+  const courtCount = orderOfPlayDefaults.courtsByBracketSize[bracketSize] || orderOfPlayDefaults.courtsByBracketSize[32]
+  const isMultiDay = String(tournament.starts_at).slice(0, 10) !== String(tournament.ends_at).slice(0, 10)
+  const firstDayRoundCount = isMultiDay ? Math.min(2, Math.max(1, rounds.length - 1)) : rounds.length
+  const dateForOffset = (offset) => {
+    const [year, month, day] = String(tournament.starts_at).slice(0, 10).split('-').map(Number)
+    const date = new Date(Date.UTC(year, month - 1, day + offset))
+    return date.toISOString().slice(0, 10)
+  }
+  const minutesUsed = [0, 0]
+  const updateNode = db.prepare('UPDATE tournament_draw_nodes SET scheduled_at = ?, court_name = ? WHERE id = ?')
+  const schedule = db.transaction(() => {
+    for (let roundIndex = 0; roundIndex < rounds.length; roundIndex += 1) {
+      const dayIndex = isMultiDay && roundIndex >= firstDayRoundCount ? 1 : 0
+      const roundNodes = nodes.filter((node) => node.round_name === rounds[roundIndex]).sort((left, right) => left.match_order - right.match_order)
+      const dayStart = rallyDateTime(`${dateForOffset(dayIndex)}T${orderOfPlayDefaults.startTime}`)
+      // Put the two feeder matches for a future matchup in the same slot. This
+      // gives both potential opponents the same recovery time before they meet.
+      const matchupGroups = Array.from({ length: Math.ceil(roundNodes.length / 2) }, (_value, index) => roundNodes.slice(index * 2, index * 2 + 2))
+      const groupsPerSlot = Math.max(1, Math.floor(courtCount / 2))
+      for (let groupIndex = 0; groupIndex < matchupGroups.length; groupIndex += 1) {
+        const group = matchupGroups[groupIndex]
+        const minutesFromStart = minutesUsed[dayIndex] + Math.floor(groupIndex / groupsPerSlot) * orderOfPlayDefaults.slotMinutes
+        const scheduledAt = new Date(dayStart.getTime() + minutesFromStart * 60 * 1000)
+        const firstCourt = groupIndex % groupsPerSlot * 2 + 1
+        group.forEach((node, index) => updateNode.run(scheduledAt.toISOString(), `Court ${firstCourt + index}`, node.id))
+      }
+      minutesUsed[dayIndex] += Math.ceil(matchupGroups.length / groupsPerSlot) * orderOfPlayDefaults.slotMinutes + orderOfPlayDefaults.restMinutes
+    }
+    db.prepare(`UPDATE matches SET
+      scheduled_at = (SELECT scheduled_at FROM tournament_draw_nodes n WHERE n.tournament_id = matches.tournament_id AND n.round_name = matches.round_name AND n.match_order = matches.match_order),
+      court_name = (SELECT court_name FROM tournament_draw_nodes n WHERE n.tournament_id = matches.tournament_id AND n.round_name = matches.round_name AND n.match_order = matches.match_order)
+      WHERE tournament_id = ?`).run(tournamentId)
+  })
+  schedule()
+  res.json({ scheduled: true, courtCount, startTime: orderOfPlayDefaults.startTime, slotMinutes: orderOfPlayDefaults.slotMinutes, restMinutes: orderOfPlayDefaults.restMinutes })
 })
 
 app.get('/api/leaderboard', (_req, res) => res.json({ players: db.prepare('SELECT leaderboard.*, users.name FROM leaderboard JOIN users ON users.id = leaderboard.user_id WHERE leaderboard.total_points > 0 ORDER BY leaderboard.rank').all() }))

@@ -68,6 +68,14 @@ CREATE TABLE IF NOT EXISTS tournament_players (
   PRIMARY KEY (tournament_id, user_id)
 );
 
+CREATE TABLE IF NOT EXISTS tournament_organizers (
+  tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  assigned_by_user_id INTEGER NOT NULL REFERENCES users(id),
+  assigned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (tournament_id, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS matches (
   id INTEGER PRIMARY KEY,
   tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
@@ -76,6 +84,7 @@ CREATE TABLE IF NOT EXISTS matches (
   player_one_id INTEGER NOT NULL REFERENCES users(id),
   player_two_id INTEGER NOT NULL REFERENCES users(id),
   scheduled_at TEXT,
+  court_name TEXT,
   status TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'in_progress', 'completed', 'cancelled')),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CHECK (player_one_id <> player_two_id),
@@ -90,6 +99,8 @@ CREATE TABLE IF NOT EXISTS tournament_draw_nodes (
   player_one_id INTEGER REFERENCES users(id),
   player_two_id INTEGER REFERENCES users(id),
   winner_user_id INTEGER REFERENCES users(id),
+  scheduled_at TEXT,
+  court_name TEXT,
   UNIQUE (tournament_id, round_name, match_order)
 );
 
@@ -139,6 +150,7 @@ GROUP BY u.id, u.username, u.total_points;
 
 CREATE INDEX IF NOT EXISTS idx_tournaments_status_starts_at ON tournaments(status, starts_at);
 CREATE INDEX IF NOT EXISTS idx_tournament_players_user ON tournament_players(user_id, registration_status);
+CREATE INDEX IF NOT EXISTS idx_tournament_organizers_user ON tournament_organizers(user_id, tournament_id);
 CREATE INDEX IF NOT EXISTS idx_access_requests_status ON access_requests(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_matches_tournament ON matches(tournament_id, status);
 CREATE INDEX IF NOT EXISTS idx_draw_nodes_tournament ON tournament_draw_nodes(tournament_id, round_name, match_order);
