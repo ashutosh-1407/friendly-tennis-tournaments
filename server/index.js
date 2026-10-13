@@ -14,6 +14,10 @@ const tournamentTiers = {
   rally_250: { label: 'Rally 250 · Court Sprint', points: 250, maxPlayers: 16, days: 1, scoring: 'single_set' },
   rally_500: { label: 'Rally 500 · Weekend Classic', points: 500, maxPlayers: 32, days: 2, scoring: 'best_of_three' },
 }
+const setFormats = {
+  standard: { gamesToWin: 6, label: 'Standard sets to 6 games' },
+  short_4: { gamesToWin: 4, label: 'Short sets to 4 games' },
+}
 const pointsExpiryDays = 180
 // Change these defaults in one place if Rally's usual play window changes.
 const orderOfPlayDefaults = { startTime: '09:00', slotMinutes: 120, restMinutes: 30, courtsByBracketSize: { 8: 2, 16: 4, 32: 4 } }
@@ -48,6 +52,9 @@ if (!db.prepare("SELECT 1 FROM pragma_table_info('access_requests') WHERE name =
 }
 if (!db.prepare("SELECT 1 FROM pragma_table_info('tournaments') WHERE name = 'tournament_tier'").get()) {
   db.exec("ALTER TABLE tournaments ADD COLUMN tournament_tier TEXT NOT NULL DEFAULT 'rally_500' CHECK (tournament_tier IN ('rally_250', 'rally_500'))")
+}
+if (!db.prepare("SELECT 1 FROM pragma_table_info('tournaments') WHERE name = 'set_format'").get()) {
+  db.exec("ALTER TABLE tournaments ADD COLUMN set_format TEXT NOT NULL DEFAULT 'standard' CHECK (set_format IN ('standard', 'short_4'))")
 }
 if (!db.prepare("SELECT 1 FROM pragma_table_info('weekly_match_sessions') WHERE name = 'court_name'").get()) {
   db.exec('ALTER TABLE weekly_match_sessions ADD COLUMN court_name TEXT')
@@ -515,11 +522,13 @@ app.post('/api/tournaments', requireOrganizer, (req, res) => {
   const startDate = String(req.body?.startDate || '').trim()
   const tierKey = String(req.body?.tournamentTier || 'rally_500')
   const tier = tournamentTiers[tierKey]
+  const setFormatKey = String(req.body?.setFormat || 'standard')
   const location = String(req.body?.location || '').trim() || null
   const description = String(req.body?.description || '').trim() || null
   if (!name || name.length > 100) return res.status(400).json({ error: 'Tournament name is required (up to 100 characters).' })
   const isValidDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T12:00:00Z`))
   if (!tier) return res.status(400).json({ error: 'Choose a valid tournament tier.' })
+  if (!setFormats[setFormatKey]) return res.status(400).json({ error: 'Choose a valid set format.' })
   if (!isValidDate(startDate)) return res.status(400).json({ error: 'Choose a valid start date.' })
   const end = new Date(`${startDate}T12:00:00`)
   end.setDate(end.getDate() + tier.days - 1)
@@ -531,10 +540,10 @@ app.post('/api/tournaments', requireOrganizer, (req, res) => {
   if (!organizer) return res.status(400).json({ error: 'Open Rally once as the organizer before creating a tournament.' })
   const registrationClosesAt = new Date(new Date(`${startDate}T09:00:00`).getTime() - 4 * 24 * 60 * 60 * 1000).toISOString()
   const tournament = db.prepare(`
-    INSERT INTO tournaments (name, description, location, starts_at, ends_at, registration_closes_at, status, tournament_tier, max_players, created_by_user_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO tournaments (name, description, location, starts_at, ends_at, registration_closes_at, status, tournament_tier, set_format, max_players, created_by_user_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     RETURNING *
-  `).get(name, description, location, `${startDate}T09:00:00`, `${endDate}T23:00:00`, registrationClosesAt, status, tierKey, tier.maxPlayers, organizer.id)
+  `).get(name, description, location, `${startDate}T09:00:00`, `${endDate}T23:00:00`, registrationClosesAt, status, tierKey, setFormatKey, tier.maxPlayers, organizer.id)
   res.status(201).json({ tournament })
 })
 
@@ -547,11 +556,13 @@ app.patch('/api/tournaments/:id', requireOrganizer, (req, res) => {
   const startDate = String(req.body?.startDate || '').trim()
   const tierKey = String(req.body?.tournamentTier || 'rally_500')
   const tier = tournamentTiers[tierKey]
+  const setFormatKey = String(req.body?.setFormat || existing.set_format || 'standard')
   const location = String(req.body?.location || '').trim() || null
   const description = String(req.body?.description || '').trim() || null
   if (!name || name.length > 100) return res.status(400).json({ error: 'Tournament name is required (up to 100 characters).' })
   const isValidDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T12:00:00Z`))
   if (!tier) return res.status(400).json({ error: 'Choose a valid tournament tier.' })
+  if (!setFormats[setFormatKey]) return res.status(400).json({ error: 'Choose a valid set format.' })
   if (!isValidDate(startDate)) return res.status(400).json({ error: 'Choose a valid start date.' })
   const registeredCount = db.prepare("SELECT COUNT(*) AS count FROM tournament_players WHERE tournament_id = ? AND registration_status = 'registered'").get(tournamentId).count
   if (registeredCount > tier.maxPlayers) return res.status(400).json({ error: `This tournament already has ${registeredCount} registered players, which exceeds the ${tier.maxPlayers}-player limit for this tier.` })
@@ -561,8 +572,8 @@ app.patch('/api/tournaments/:id', requireOrganizer, (req, res) => {
   const today = rallyCalendarDate()
   const status = endDate < today ? 'past' : startDate > today ? 'upcoming' : 'current'
   const registrationClosesAt = new Date(new Date(`${startDate}T09:00:00`).getTime() - 4 * 24 * 60 * 60 * 1000).toISOString()
-  const tournament = db.prepare(`UPDATE tournaments SET name = ?, description = ?, location = ?, starts_at = ?, ends_at = ?, registration_closes_at = ?, status = ?, tournament_tier = ?, max_players = ?, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ? RETURNING *`).get(name, description, location, `${startDate}T09:00:00`, `${endDate}T23:00:00`, registrationClosesAt, status, tierKey, tier.maxPlayers, tournamentId)
+  const tournament = db.prepare(`UPDATE tournaments SET name = ?, description = ?, location = ?, starts_at = ?, ends_at = ?, registration_closes_at = ?, status = ?, tournament_tier = ?, set_format = ?, max_players = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ? RETURNING *`).get(name, description, location, `${startDate}T09:00:00`, `${endDate}T23:00:00`, registrationClosesAt, status, tierKey, setFormatKey, tier.maxPlayers, tournamentId)
   res.json({ tournament })
 })
 
@@ -809,15 +820,15 @@ function validTiebreak(one, two, target) {
   return Number.isInteger(one) && Number.isInteger(two) && ((one >= target || two >= target) && Math.abs(one - two) >= 2)
 }
 
-function validStandardSet(set) {
+function validSet(set, gamesToWin) {
   const one = Number(set.playerOneGames)
   const two = Number(set.playerTwoGames)
   if (!Number.isInteger(one) || !Number.isInteger(two) || one < 0 || two < 0) return false
   const winner = Math.max(one, two)
   const loser = Math.min(one, two)
-  if (winner === 6 && loser <= 4) return true
-  if (winner === 7 && loser === 5) return true
-  if (winner === 7 && loser === 6) {
+  if (winner === gamesToWin && loser <= gamesToWin - 2) return true
+  if (winner === gamesToWin + 1 && loser === gamesToWin - 1) return true
+  if (winner === gamesToWin + 1 && loser === gamesToWin) {
     const tieOne = Number(set.tiebreakPlayerOne)
     const tieTwo = Number(set.tiebreakPlayerTwo)
     return validTiebreak(tieOne, tieTwo, 7) && ((one > two) === (tieOne > tieTwo))
@@ -986,7 +997,7 @@ function rallyTimeParts(date) {
 app.post('/api/matches/:id/result', requireUser, (req, res) => {
   const match = db.prepare('SELECT * FROM matches WHERE id = ?').get(Number(req.params.id))
   if (!match) return res.status(404).json({ error: 'Match not found.' })
-  const tournament = db.prepare('SELECT status, tournament_tier FROM tournaments WHERE id = ?').get(match.tournament_id)
+  const tournament = db.prepare('SELECT status, tournament_tier, set_format FROM tournaments WHERE id = ?').get(match.tournament_id)
   if (tournament?.status !== 'current') return res.status(400).json({ error: 'Scores can only be entered for current tournaments.' })
   const user = req.authUser
   const tournamentManager = isTournamentManager(req, match.tournament_id)
@@ -995,8 +1006,9 @@ app.post('/api/matches/:id/result', requireUser, (req, res) => {
   if (existingResult && !tournamentManager) return res.status(409).json({ error: 'This score has already been submitted. Only the tournament organizer can change it.' })
   const sets = Array.isArray(req.body?.sets) ? req.body.sets : []
   const isSingleSet = tournament.tournament_tier === 'rally_250'
-  if (isSingleSet && (sets.length !== 1 || !validStandardSet(sets[0]))) return res.status(400).json({ error: 'Enter one valid tennis set score.' })
-  if (!isSingleSet && (sets.length !== 3 || !validStandardSet(sets[0]) || !validStandardSet(sets[1]))) return res.status(400).json({ error: 'Enter two valid tennis set scores.' })
+  const gamesToWin = setFormats[tournament.set_format]?.gamesToWin || setFormats.standard.gamesToWin
+  if (isSingleSet && (sets.length !== 1 || !validSet(sets[0], gamesToWin))) return res.status(400).json({ error: `Enter one valid first-to-${gamesToWin} tennis set score.` })
+  if (!isSingleSet && (sets.length !== 3 || !validSet(sets[0], gamesToWin) || !validSet(sets[1], gamesToWin))) return res.status(400).json({ error: `Enter two valid first-to-${gamesToWin} tennis set scores.` })
   const firstTwoWinners = sets.slice(0, isSingleSet ? 1 : 2).map((set) => Number(set.playerOneGames) > Number(set.playerTwoGames) ? 1 : 2)
   if (isSingleSet) {
     const winnerUserId = firstTwoWinners[0] === 1 ? match.player_one_id : match.player_two_id

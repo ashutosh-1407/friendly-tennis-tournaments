@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS tournaments (
   registration_closes_at TEXT,
   status TEXT NOT NULL DEFAULT 'upcoming' CHECK (status IN ('upcoming', 'current', 'past', 'cancelled')),
   tournament_tier TEXT NOT NULL DEFAULT 'rally_500' CHECK (tournament_tier IN ('rally_250', 'rally_500')),
+  set_format TEXT NOT NULL DEFAULT 'standard' CHECK (set_format IN ('standard', 'short_4')),
   format TEXT NOT NULL DEFAULT 'singles' CHECK (format IN ('singles', 'doubles')),
   max_players INTEGER CHECK (max_players IS NULL OR max_players > 1),
   draw_published_at TEXT,
