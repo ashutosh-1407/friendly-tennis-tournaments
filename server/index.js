@@ -135,6 +135,7 @@ function restoreDatabase() {
 try {
   if (restoreDatabase()) console.log('Rally data restored from JSON snapshot')
   refreshTournamentStatuses()
+  refreshTournamentRegistrationDeadlines()
   refreshUserPoints()
   persistDatabase()
 } catch (error) {
@@ -538,7 +539,7 @@ app.post('/api/tournaments', requireOrganizer, (req, res) => {
   const status = endDate < today ? 'past' : startDate > today ? 'upcoming' : 'current'
   const organizer = db.prepare('SELECT id FROM users WHERE username = ?').get(organizerUsername)
   if (!organizer) return res.status(400).json({ error: 'Open Rally once as the organizer before creating a tournament.' })
-  const registrationClosesAt = new Date(new Date(`${startDate}T09:00:00`).getTime() - 4 * 24 * 60 * 60 * 1000).toISOString()
+  const registrationClosesAt = tournamentRegistrationClosesAt(startDate).toISOString()
   const tournament = db.prepare(`
     INSERT INTO tournaments (name, description, location, starts_at, ends_at, registration_closes_at, status, tournament_tier, set_format, max_players, created_by_user_id)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -571,7 +572,7 @@ app.patch('/api/tournaments/:id', requireOrganizer, (req, res) => {
   const endDate = end.toISOString().slice(0, 10)
   const today = rallyCalendarDate()
   const status = endDate < today ? 'past' : startDate > today ? 'upcoming' : 'current'
-  const registrationClosesAt = new Date(new Date(`${startDate}T09:00:00`).getTime() - 4 * 24 * 60 * 60 * 1000).toISOString()
+  const registrationClosesAt = tournamentRegistrationClosesAt(startDate).toISOString()
   const tournament = db.prepare(`UPDATE tournaments SET name = ?, description = ?, location = ?, starts_at = ?, ends_at = ?, registration_closes_at = ?, status = ?, tournament_tier = ?, set_format = ?, max_players = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ? RETURNING *`).get(name, description, location, `${startDate}T09:00:00`, `${endDate}T23:00:00`, registrationClosesAt, status, tierKey, setFormatKey, tier.maxPlayers, tournamentId)
   res.json({ tournament })
@@ -970,6 +971,21 @@ function refreshTournamentStatuses() {
     const status = today > endDate ? 'past' : today >= startDate ? 'current' : 'upcoming'
     if (tournament.status !== status) update.run(status, tournament.id, status)
   }
+}
+
+function tournamentRegistrationClosesAt(startDate) {
+  const [year, month, day] = String(startDate).slice(0, 10).split('-').map(Number)
+  const deadlineDate = new Date(Date.UTC(year, month - 1, day))
+  deadlineDate.setUTCDate(deadlineDate.getUTCDate() - 4)
+  const closesAt = rallyDateTime(`${deadlineDate.toISOString().slice(0, 10)}T23:59`)
+  closesAt.setSeconds(59, 999)
+  return closesAt
+}
+
+function refreshTournamentRegistrationDeadlines() {
+  const tournaments = db.prepare("SELECT id, starts_at FROM tournaments WHERE status IN ('upcoming', 'current')").all()
+  const update = db.prepare('UPDATE tournaments SET registration_closes_at = ? WHERE id = ?')
+  for (const tournament of tournaments) update.run(tournamentRegistrationClosesAt(tournament.starts_at).toISOString(), tournament.id)
 }
 
 function rallyCalendarDate(date = new Date()) {
