@@ -572,9 +572,12 @@ app.patch('/api/tournaments/:id', requireOrganizer, (req, res) => {
   const endDate = end.toISOString().slice(0, 10)
   const today = rallyCalendarDate()
   const status = endDate < today ? 'past' : startDate > today ? 'upcoming' : 'current'
-  const registrationClosesAt = tournamentRegistrationClosesAt(startDate).toISOString()
+  const requestedDeadline = String(req.body?.registrationClosesAt || '').trim()
+  const registrationClosesAt = requestedDeadline ? rallyDateTime(requestedDeadline) : tournamentRegistrationClosesAt(startDate)
+  if (Number.isNaN(registrationClosesAt.getTime())) return res.status(400).json({ error: 'Choose a valid registration deadline.' })
+  if (registrationClosesAt >= rallyDateTime(`${startDate}T09:00`)) return res.status(400).json({ error: 'The registration deadline must be before the tournament starts.' })
   const tournament = db.prepare(`UPDATE tournaments SET name = ?, description = ?, location = ?, starts_at = ?, ends_at = ?, registration_closes_at = ?, status = ?, tournament_tier = ?, set_format = ?, max_players = ?, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ? RETURNING *`).get(name, description, location, `${startDate}T09:00:00`, `${endDate}T23:00:00`, registrationClosesAt, status, tierKey, setFormatKey, tier.maxPlayers, tournamentId)
+    WHERE id = ? RETURNING *`).get(name, description, location, `${startDate}T09:00:00`, `${endDate}T23:00:00`, registrationClosesAt.toISOString(), status, tierKey, setFormatKey, tier.maxPlayers, tournamentId)
   res.json({ tournament })
 })
 

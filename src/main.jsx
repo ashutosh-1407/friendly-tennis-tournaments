@@ -89,6 +89,14 @@ function tournamentEndDate(startDate, tierKey) {
   return end.toISOString().slice(0, 10)
 }
 
+function dateTimeLocalValue(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const pad = (number) => String(number).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
 function TournamentDraw({ draw, isOrganizer, tournamentStatus, drawActionPending, onManage, userId, onEnterScore, onAwardBye }) {
   draw = { visible: false, organizerPreview: false, matches: [], ...draw }
   draw.rounds = Array.isArray(draw.rounds) ? draw.rounds : []
@@ -224,7 +232,7 @@ function App() {
   const [usernameError, setUsernameError] = React.useState('')
   const isOrganizer = username.toLowerCase() === ORGANIZER_USERNAME
   const [organizerPasscode, setOrganizerPasscode] = React.useState(sessionStorage.getItem(ORGANIZER_PASSCODE_KEY) || '')
-  const [tournamentDraft, setTournamentDraft] = React.useState({ name: '', startDate: '', tournamentTier: 'rally_500', setFormat: 'standard', location: '', description: '' })
+  const [tournamentDraft, setTournamentDraft] = React.useState({ name: '', startDate: '', tournamentTier: 'rally_500', setFormat: 'standard', registrationClosesAt: '', location: '', description: '' })
   const [editingTournamentId, setEditingTournamentId] = React.useState(null)
   const [creationError, setCreationError] = React.useState('')
   const [isCreating, setIsCreating] = React.useState(false)
@@ -883,7 +891,7 @@ function App() {
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Unable to create the tournament.')
-      setTournamentDraft({ name: '', startDate: '', tournamentTier: 'rally_500', setFormat: 'standard', location: '', description: '' })
+      setTournamentDraft({ name: '', startDate: '', tournamentTier: 'rally_500', setFormat: 'standard', registrationClosesAt: '', location: '', description: '' })
       setActiveTab('tournaments')
       setTournamentFilter(data.tournament.status === 'upcoming' ? 'current' : data.tournament.status)
       setNotice(`“${data.tournament.name}” has been created.`)
@@ -897,7 +905,7 @@ function App() {
   function openTournamentEdit(tournament) {
     setCreationError('')
     setEditingTournamentId(tournament.id)
-    setTournamentDraft({ name: tournament.name, startDate: tournament.starts_at.slice(0, 10), tournamentTier: tournament.tournament_tier || 'rally_500', setFormat: tournament.set_format || 'standard', location: tournament.location || '', description: tournament.description || '' })
+    setTournamentDraft({ name: tournament.name, startDate: tournament.starts_at.slice(0, 10), tournamentTier: tournament.tournament_tier || 'rally_500', setFormat: tournament.set_format || 'standard', registrationClosesAt: dateTimeLocalValue(tournament.registration_closes_at), location: tournament.location || '', description: tournament.description || '' })
     setActiveTab('edit-tournament')
   }
 
@@ -1044,6 +1052,7 @@ function App() {
             <label>Tournament tier<select name="tournamentTier" value={tournamentDraft.tournamentTier} onChange={updateTournamentDraft}>{Object.entries(TOURNAMENT_TIERS).map(([key, tier]) => <option key={key} value={key}>{tier.label} — {tier.points} pts</option>)}</select><span className="tier-description">{TOURNAMENT_TIERS[tournamentDraft.tournamentTier].days} day · {TOURNAMENT_TIERS[tournamentDraft.tournamentTier].scoring} · Up to {TOURNAMENT_TIERS[tournamentDraft.tournamentTier].maxPlayers} players</span></label>
             <label>Set format<select name="setFormat" value={tournamentDraft.setFormat} onChange={updateTournamentDraft}>{Object.entries(SET_FORMATS).map(([key, format]) => <option key={key} value={key}>{format.label}</option>)}</select><span className="tier-description">A 7-point, win-by-two tiebreak is played at {SET_FORMATS[tournamentDraft.setFormat].gamesToWin}–{SET_FORMATS[tournamentDraft.setFormat].gamesToWin}. Best-of-three events still use a first-to-10 deciding match tiebreak.</span></label>
             <div className="form-grid"><label>Start date<input type="date" name="startDate" value={tournamentDraft.startDate} onChange={updateTournamentDraft} required /></label><label>End date <span className="optional">(set by tier)</span><input type="date" value={tournamentEndDate(tournamentDraft.startDate, tournamentDraft.tournamentTier)} readOnly /></label></div>
+            {activeTab === 'edit-tournament' && <label>Registration deadline<input type="datetime-local" name="registrationClosesAt" value={tournamentDraft.registrationClosesAt} onChange={updateTournamentDraft} required /><span className="tier-description">Players can register or withdraw until this exact time.</span></label>}
             <label>Location <span className="optional">(optional)</span><input name="location" value={tournamentDraft.location} onChange={updateTournamentDraft} placeholder="e.g. Riverside Tennis Center" maxLength="120" /></label>
             <label>Note for players <span className="optional">(optional)</span><textarea name="description" value={tournamentDraft.description} onChange={updateTournamentDraft} placeholder="Share any useful details: start time, court number, or format." maxLength="500" rows="4" /></label>
             {creationError && <p className="creation-error" role="alert">{creationError}</p>}
