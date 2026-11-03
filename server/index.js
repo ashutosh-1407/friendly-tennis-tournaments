@@ -627,7 +627,7 @@ app.get('/api/tournaments', (req, res) => {
     }
     else query += ' AND 1 = 0'
   }
-  res.json({ tournaments: db.prepare(`${query} ORDER BY t.starts_at ASC`).all(...params) })
+  res.json({ tournaments: db.prepare(`${query} ORDER BY t.starts_at ASC`).all(...params), totalTournamentCount: db.prepare('SELECT COUNT(*) AS count FROM tournaments').get().count })
 })
 
 app.post('/api/tournaments/:id/registrations', requireUser, (req, res) => {
@@ -908,14 +908,9 @@ function resolveDrawNodes(tournamentId) {
   }
 }
 
-function recalculateTournamentPoints(tournamentId) {
-  const tournament = db.prepare('SELECT tournament_tier FROM tournaments WHERE id = ?').get(tournamentId)
-  const totalPoints = tournamentTiers[tournament?.tournament_tier]?.points || 500
-  const fieldSize = db.prepare("SELECT COUNT(*) AS count FROM tournament_players WHERE tournament_id = ? AND registration_status = 'registered'").get(tournamentId).count
-  if (fieldSize < 2) {
-    refreshUserPoints()
-    return
-  }
+function pointsByTournamentRound(tournamentTier, fieldSize) {
+  if (fieldSize < 2) return {}
+  const totalPoints = tournamentTiers[tournamentTier]?.points || 500
   const bracketSize = 2 ** Math.ceil(Math.log2(fieldSize))
   const names = { 2: 'Final', 4: 'Semifinals', 8: 'Quarterfinals', 16: 'Round of 16', 32: 'Round of 32' }
   const rounds = []
@@ -928,6 +923,17 @@ function recalculateTournamentPoints(tournamentId) {
     pointsByRound[round] = index === rounds.length - 1 ? totalPoints - allocated : Math.floor(totalPoints * weights[index] / totalWeight)
     allocated += pointsByRound[round]
   })
+  return pointsByRound
+}
+
+function recalculateTournamentPoints(tournamentId) {
+  const tournament = db.prepare('SELECT tournament_tier FROM tournaments WHERE id = ?').get(tournamentId)
+  const fieldSize = db.prepare("SELECT COUNT(*) AS count FROM tournament_players WHERE tournament_id = ? AND registration_status = 'registered'").get(tournamentId).count
+  if (fieldSize < 2) {
+    refreshUserPoints()
+    return
+  }
+  const pointsByRound = pointsByTournamentRound(tournament?.tournament_tier, fieldSize)
   const earned = new Map()
   for (const result of db.prepare('SELECT r.winner_user_id, m.round_name FROM match_results r JOIN matches m ON m.id = r.match_id WHERE m.tournament_id = ?').all(tournamentId)) {
     earned.set(result.winner_user_id, (earned.get(result.winner_user_id) || 0) + (pointsByRound[result.round_name] || 0))
@@ -1154,6 +1160,35 @@ app.post('/api/tournaments/:id/order-of-play/auto-schedule', requireTournamentMa
   })
   schedule()
   res.json({ scheduled: true, courtCount, startTime: orderOfPlayDefaults.startTime, slotMinutes: orderOfPlayDefaults.slotMinutes, restMinutes: orderOfPlayDefaults.restMinutes })
+})
+
+app.get('/api/profile', requireUser, (req, res) => {
+  const user = req.authUser
+  const tournaments = db.prepare(`SELECT t.id, t.name, t.starts_at, t.ends_at, t.status, t.tournament_tier, tp.points_earned
+    FROM tournament_players tp
+    JOIN tournaments t ON t.id = tp.tournament_id
+    WHERE tp.user_id = ? AND tp.registration_status = 'registered'
+    ORDER BY t.starts_at DESC`).all(user.id)
+  const matches = db.prepare(`SELECT m.id, m.tournament_id, m.round_name, m.status, m.player_one_id, r.winner_user_id,
+      r.player_one_score, r.player_two_score,
+      CASE WHEN m.player_one_id = ? THEN COALESCE(NULLIF(p2.name, ''), p2.username) ELSE COALESCE(NULLIF(p1.name, ''), p1.username) END AS opponent_name
+    FROM matches m
+    JOIN users p1 ON p1.id = m.player_one_id
+    JOIN users p2 ON p2.id = m.player_two_id
+    LEFT JOIN match_results r ON r.match_id = m.id
+    WHERE m.player_one_id = ? OR m.player_two_id = ?
+    ORDER BY m.match_order`).all(user.id, user.id, user.id)
+  const matchesByTournament = new Map()
+  for (const match of matches) {
+    const fieldSize = db.prepare("SELECT COUNT(*) AS count FROM tournament_players WHERE tournament_id = ? AND registration_status = 'registered'").get(match.tournament_id).count
+    const tournament = tournaments.find((item) => item.id === match.tournament_id)
+    const pointsByRound = pointsByTournamentRound(tournament?.tournament_tier, fieldSize)
+    const won = match.winner_user_id === user.id
+    const userIsPlayerOne = match.player_one_id === user.id
+    const item = { ...match, won, player_score: userIsPlayerOne ? match.player_one_score : match.player_two_score, opponent_score: userIsPlayerOne ? match.player_two_score : match.player_one_score, points_earned: won ? (pointsByRound[match.round_name] || 0) : 0 }
+    matchesByTournament.set(match.tournament_id, [...(matchesByTournament.get(match.tournament_id) || []), item])
+  }
+  res.json({ user, tournaments: tournaments.map((tournament) => ({ ...tournament, matches: matchesByTournament.get(tournament.id) || [] })) })
 })
 
 app.get('/api/leaderboard', (_req, res) => res.json({ players: db.prepare('SELECT leaderboard.*, users.name FROM leaderboard JOIN users ON users.id = leaderboard.user_id WHERE leaderboard.total_points > 0 ORDER BY leaderboard.rank').all() }))

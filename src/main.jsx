@@ -55,6 +55,14 @@ function displayName(player) {
   return player?.name || player?.display_name || player?.username || ''
 }
 
+function ProfilePage({ profile, isLoading, error }) {
+  if (isLoading) return <section className="page profile-page"><p className="detail-loading">Loading profile…</p></section>
+  if (error) return <section className="page profile-page"><p className="creation-error">{error}</p></section>
+  const user = profile?.user
+  const tournaments = profile?.tournaments || []
+  return <section className="page profile-page" aria-labelledby="profile-title"><div className="page-heading"><div><p className="eyebrow">PLAYER PROFILE</p><h1 id="profile-title">{displayName(user)}</h1><p>{user?.total_points || 0} active points · tournament match history</p></div></div>{tournaments.length ? <div className="profile-tournaments">{tournaments.map((tournament) => <article className="profile-tournament" key={tournament.id}><div className="profile-tournament-head"><div><p className="card-date">{new Date(tournament.starts_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</p><h2>{tournament.name}</h2></div><strong>{tournament.points_earned} pts</strong></div>{tournament.matches.length ? <div className="profile-match-list">{tournament.matches.map((match) => <div className="profile-match" key={match.id}><span>{match.round_name}</span><div><strong>{match.status === 'completed' ? (match.won ? 'Won' : 'Lost') : 'Scheduled'}</strong><small>{match.opponent_name ? `vs ${match.opponent_name}` : 'Opponent to be decided'}</small></div><span className="profile-score">{match.status === 'completed' ? `${match.player_score} – ${match.opponent_score}` : '—'}</span><b className={match.points_earned ? '' : 'profile-no-points'}>{match.points_earned ? `+${match.points_earned} pts` : '0 pts'}</b></div>)}</div> : <p className="profile-empty-matches">No completed matches yet.</p>}</article>)}</div> : <div className="empty-state"><div className="court-mark"><TennisBall /></div><h2>No tournaments yet</h2><p>Your tournament history and match points will appear here.</p></div>}</section>
+}
+
 function registrationHasClosed(tournament) {
   const cutoff = tournament.registration_closes_at ? new Date(tournament.registration_closes_at) : new Date(new Date(tournament.starts_at).getTime() - 4 * 24 * 60 * 60 * 1000)
   return Date.now() >= cutoff.getTime()
@@ -222,6 +230,7 @@ function App() {
   const [isCreating, setIsCreating] = React.useState(false)
   const [isDeletingTournament, setIsDeletingTournament] = React.useState(false)
   const [tournaments, setTournaments] = React.useState([])
+  const [totalTournamentCount, setTotalTournamentCount] = React.useState(0)
   const [isLoadingTournaments, setIsLoadingTournaments] = React.useState(false)
   const [registrationError, setRegistrationError] = React.useState('')
   const [registrationPending, setRegistrationPending] = React.useState(null)
@@ -247,6 +256,9 @@ function App() {
   const [scoreError, setScoreError] = React.useState('')
   const [isSavingScore, setIsSavingScore] = React.useState(false)
   const [leaderboardPlayers, setLeaderboardPlayers] = React.useState([])
+  const [profileData, setProfileData] = React.useState(null)
+  const [isLoadingProfile, setIsLoadingProfile] = React.useState(false)
+  const [profileError, setProfileError] = React.useState('')
   const [registeredUsers, setRegisteredUsers] = React.useState([])
   const [usersError, setUsersError] = React.useState('')
   const [deletingUserId, setDeletingUserId] = React.useState(null)
@@ -396,8 +408,8 @@ function App() {
     if (userId) parameters.set('userId', userId)
     fetch(`/api/tournaments?${parameters}`)
       .then((response) => response.ok ? response.json() : Promise.reject())
-      .then((data) => setTournaments(data.tournaments || []))
-      .catch(() => setTournaments([]))
+      .then((data) => { setTournaments(data.tournaments || []); setTotalTournamentCount(Number(data.totalTournamentCount) || 0) })
+      .catch(() => { setTournaments([]); setTotalTournamentCount(0) })
       .finally(() => setIsLoadingTournaments(false))
   }, [activeTab, tournamentFilter, userId, notice])
 
@@ -421,6 +433,21 @@ function App() {
       .then((response) => response.ok ? response.json() : Promise.reject())
       .then((data) => { setLeaderboardPlayers(data.players || []); setLeaderboardPage(1) })
       .catch(() => setLeaderboardPlayers([]))
+  }, [activeTab, detailVersion])
+
+  React.useEffect(() => {
+    if (activeTab !== 'profile') return
+    setIsLoadingProfile(true)
+    setProfileError('')
+    fetch('/api/profile')
+      .then(async (response) => {
+        const data = await response.json()
+        if (!response.ok) throw new Error(data.error || 'Unable to load your profile.')
+        return data
+      })
+      .then((data) => setProfileData(data))
+      .catch((error) => setProfileError(error.message))
+      .finally(() => setIsLoadingProfile(false))
   }, [activeTab, detailVersion])
 
   React.useEffect(() => {
@@ -995,6 +1022,7 @@ function App() {
           <button className={['tournaments', 'create', 'edit-tournament'].includes(activeTab) ? 'active' : ''} onClick={() => selectTab('tournaments')}>Tournaments</button>
           <button className={activeTab === 'leaderboard' ? 'active' : ''} onClick={() => selectTab('leaderboard')}>Leaderboard</button>
           {isOrganizer && inviteOnlySignup && <button className={activeTab === 'messages' ? 'active' : ''} onClick={() => selectTab('messages')}>Messages{unreadAccessRequestCount > 0 && <span className="message-badge" aria-label={`${unreadAccessRequestCount} new access requests`}>{unreadAccessRequestCount}</span>}</button>}
+          <button className={activeTab === 'profile' ? 'active' : ''} onClick={() => selectTab('profile')}>Profile</button>
           {isOrganizer && <button className={activeTab === 'users' ? 'active' : ''} onClick={() => selectTab('users')}>Users</button>}
         </nav>
         <button className="profile" onClick={changeUser} title="Use a different username"><span className="avatar">{(name || username).slice(0, 1).toUpperCase()}</span><span>{name || `@${username}`}</span><span className="switch">Switch</span></button>
@@ -1022,7 +1050,7 @@ function App() {
             <div className="form-actions"><button type="button" className="cancel-button" onClick={() => selectTab('tournaments')}>Cancel</button><button type="submit" className="primary-action" disabled={isCreating}>{isCreating ? 'Saving…' : activeTab === 'edit-tournament' ? 'Save changes' : 'Create tournament'}</button></div>
           </form>
         </section>
-      ) : activeTab === 'messages' && isOrganizer && inviteOnlySignup ? <AccessRequestsPage requests={accessRequests} error={accessRequestsError} isLoading={isLoadingAccessRequests} onGenerate={generateInvite} generatedInvite={generatedInvite} onDismissInvite={() => setGeneratedInvite('')} /> : activeTab === 'users' && isOrganizer ? (
+      ) : activeTab === 'messages' && isOrganizer && inviteOnlySignup ? <AccessRequestsPage requests={accessRequests} error={accessRequestsError} isLoading={isLoadingAccessRequests} onGenerate={generateInvite} generatedInvite={generatedInvite} onDismissInvite={() => setGeneratedInvite('')} /> : activeTab === 'profile' ? <ProfilePage profile={profileData} isLoading={isLoadingProfile} error={profileError} /> : activeTab === 'users' && isOrganizer ? (
         <section className="page" aria-labelledby="users-title">
           <div className="page-heading"><div><p className="eyebrow">ORGANIZER TOOLS</p><h1 id="users-title">Registered users</h1><p>{registeredUsers.length} players in Rally.</p></div></div>
           {usersError ? <p className="creation-error">{usersError}</p> : <><div className="users-table">{visibleUsers.map((player) => <div className="user-row" key={player.id}><div className="user-identity"><strong>{displayName(player)}</strong><span>@{player.username}</span></div><div className="user-row-actions"><span>{player.total_points} pts</span>{player.username.toLowerCase() !== ORGANIZER_USERNAME && <button className="icon-action icon-action--delete" disabled={deletingUserId === player.id} onClick={() => deleteUser(player)} aria-label={`Delete ${displayName(player)}`} title={`Delete ${displayName(player)}`}><TrashIcon /></button>}</div></div>)}</div>{registeredUsers.length > USERS_PER_PAGE && <div className="pagination"><button className="secondary-action" disabled={usersPage === 1} onClick={() => setUsersPage((page) => page - 1)}>← Previous</button><span>Page {usersPage} of {usersPageCount}</span><button className="secondary-action" disabled={usersPage === usersPageCount} onClick={() => setUsersPage((page) => page + 1)}>Next →</button></div>}</>}
@@ -1040,7 +1068,7 @@ function App() {
           {notice && <div className="notice" role="status">{notice}</div>}
           {registrationError && <div className="registration-error" role="alert">{registrationError}</div>}
           <div className="empty-state">
-            {isLoadingTournaments ? <p>Loading tournaments…</p> : tournaments.length ? <div className="tournament-list">{tournaments.map((tournament) => <article className="tournament-card" key={tournament.id} onClick={() => openTournament(tournament.id)}><div><p className="card-date">{new Date(tournament.starts_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}{tournament.starts_at.slice(0, 10) !== tournament.ends_at.slice(0, 10) && ` – ${new Date(tournament.ends_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`}</p><h2>{tournament.name}</h2><span className="tier-badge">{TOURNAMENT_TIERS[tournament.tournament_tier]?.label || 'Rally 500 · Weekend Classic'}</span>{tournament.status !== 'past' && <p className="capacity-note">{remainingCapacityLabel(tournament)}</p>}{tournament.location && <p>{tournament.location}</p>}{tournament.description && <p>{tournament.description}</p>}{registrationDeadlineLabel(tournament) && <p className={registrationHasClosed(tournament) ? 'registration-deadline registration-deadline--closed' : 'registration-deadline'}>{registrationDeadlineLabel(tournament)}</p>}</div><div className="card-action">{tournament.registration_status === 'registered' ? (tournament.status !== 'past' && !registrationHasClosed(tournament) ? <button className="secondary-action withdraw-action" disabled={registrationPending === tournament.id} onClick={(event) => { event.stopPropagation(); withdrawFromTournament(tournament) }}>{registrationPending === tournament.id ? 'Withdrawing…' : 'Withdraw'}</button> : <span className="registered">Registered</span>) : tournament.status !== 'past' && (registrationHasClosed(tournament) ? <span className="registration-closed">Registration closed</span> : <button className="secondary-action" disabled={registrationPending === tournament.id} onClick={(event) => { event.stopPropagation(); registerForTournament(tournament) }}>{registrationPending === tournament.id ? 'Registering…' : 'Register'}</button>)}</div></article>)}</div> : <><div className="court-mark"><TennisBall /></div><h2>No {tournamentFilter} tournaments yet</h2><p>{tournamentFilter === 'upcoming' ? 'Check back soon for a friendly match near you.' : `When you have ${tournamentFilter} tournaments, they’ll appear here.`}</p>{tournamentFilter === 'upcoming' && isOrganizer && <button className="secondary-action" onClick={() => selectTab('create')}>Create the first tournament</button>}</>}
+            {isLoadingTournaments ? <p>Loading tournaments…</p> : tournaments.length ? <div className="tournament-list">{tournaments.map((tournament) => <article className="tournament-card" key={tournament.id} onClick={() => openTournament(tournament.id)}><div><p className="card-date">{new Date(tournament.starts_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}{tournament.starts_at.slice(0, 10) !== tournament.ends_at.slice(0, 10) && ` – ${new Date(tournament.ends_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`}</p><h2>{tournament.name}</h2><span className="tier-badge">{TOURNAMENT_TIERS[tournament.tournament_tier]?.label || 'Rally 500 · Weekend Classic'}</span>{tournament.status !== 'past' && <p className="capacity-note">{remainingCapacityLabel(tournament)}</p>}{tournament.location && <p>{tournament.location}</p>}{tournament.description && <p>{tournament.description}</p>}{registrationDeadlineLabel(tournament) && <p className={registrationHasClosed(tournament) ? 'registration-deadline registration-deadline--closed' : 'registration-deadline'}>{registrationDeadlineLabel(tournament)}</p>}</div><div className="card-action">{tournament.registration_status === 'registered' ? (tournament.status !== 'past' && !registrationHasClosed(tournament) ? <button className="secondary-action withdraw-action" disabled={registrationPending === tournament.id} onClick={(event) => { event.stopPropagation(); withdrawFromTournament(tournament) }}>{registrationPending === tournament.id ? 'Withdrawing…' : 'Withdraw'}</button> : <span className="registered">Registered</span>) : tournament.status !== 'past' && (registrationHasClosed(tournament) ? <span className="registration-closed">Registration closed</span> : <button className="secondary-action" disabled={registrationPending === tournament.id} onClick={(event) => { event.stopPropagation(); registerForTournament(tournament) }}>{registrationPending === tournament.id ? 'Registering…' : 'Register'}</button>)}</div></article>)}</div> : <><div className="court-mark"><TennisBall /></div><h2>No {tournamentFilter} tournaments yet</h2><p>{tournamentFilter === 'upcoming' ? 'Check back soon for a friendly match near you.' : `When you have ${tournamentFilter} tournaments, they’ll appear here.`}</p>{tournamentFilter === 'upcoming' && isOrganizer && <button className="secondary-action" onClick={() => selectTab('create')}>{totalTournamentCount === 0 ? 'Create the first tournament' : 'Create tournament'}</button>}</>}
           </div>
         </section>
       ) : (
