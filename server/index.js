@@ -992,7 +992,7 @@ function tournamentRegistrationClosesAt(startDate) {
 }
 
 function refreshTournamentRegistrationDeadlines() {
-  const tournaments = db.prepare("SELECT id, starts_at FROM tournaments WHERE status IN ('upcoming', 'current')").all()
+  const tournaments = db.prepare("SELECT id, starts_at FROM tournaments WHERE status IN ('upcoming', 'current') AND registration_closes_at IS NULL").all()
   const update = db.prepare('UPDATE tournaments SET registration_closes_at = ? WHERE id = ?')
   for (const tournament of tournaments) update.run(tournamentRegistrationClosesAt(tournament.starts_at).toISOString(), tournament.id)
 }
