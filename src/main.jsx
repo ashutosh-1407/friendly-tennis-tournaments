@@ -226,6 +226,8 @@ function App() {
   const [accessMessage, setAccessMessage] = React.useState('')
   const [accessRequestSent, setAccessRequestSent] = React.useState(false)
   const [activeTab, setActiveTab] = React.useState('weekly')
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = React.useState(false)
+  const accountMenuRef = React.useRef(null)
   const [tournamentFilter, setTournamentFilter] = React.useState('current')
   const [notice, setNotice] = React.useState('')
   const [isSavingUsername, setIsSavingUsername] = React.useState(false)
@@ -319,6 +321,21 @@ function App() {
       .finally(() => setIsCheckingSession(false))
   }, [])
 
+  React.useEffect(() => {
+    if (!isAccountMenuOpen) return
+    function dismissAccountMenu(event) {
+      if (event.type === 'keydown' && event.key !== 'Escape') return
+      if (event.type === 'mousedown' && accountMenuRef.current?.contains(event.target)) return
+      setIsAccountMenuOpen(false)
+    }
+    document.addEventListener('mousedown', dismissAccountMenu)
+    document.addEventListener('keydown', dismissAccountMenu)
+    return () => {
+      document.removeEventListener('mousedown', dismissAccountMenu)
+      document.removeEventListener('keydown', dismissAccountMenu)
+    }
+  }, [isAccountMenuOpen])
+
   async function continueAsUser(event) {
     event.preventDefault()
     const cleanName = draftName.trim()
@@ -390,6 +407,7 @@ function App() {
 
   function changeUser() {
     fetch('/api/auth/signout', { method: 'POST' }).catch(() => {})
+    setIsAccountMenuOpen(false)
     localStorage.removeItem(USERNAME_KEY)
     localStorage.removeItem(USER_ID_KEY)
     sessionStorage.removeItem(ORGANIZER_PASSCODE_KEY)
@@ -1030,10 +1048,17 @@ function App() {
           <button className={['tournaments', 'create', 'edit-tournament'].includes(activeTab) ? 'active' : ''} onClick={() => selectTab('tournaments')}>Tournaments</button>
           <button className={activeTab === 'leaderboard' ? 'active' : ''} onClick={() => selectTab('leaderboard')}>Leaderboard</button>
           {isOrganizer && inviteOnlySignup && <button className={activeTab === 'messages' ? 'active' : ''} onClick={() => selectTab('messages')}>Messages{unreadAccessRequestCount > 0 && <span className="message-badge" aria-label={`${unreadAccessRequestCount} new access requests`}>{unreadAccessRequestCount}</span>}</button>}
-          <button className={activeTab === 'profile' ? 'active' : ''} onClick={() => selectTab('profile')}>Profile</button>
           {isOrganizer && <button className={activeTab === 'users' ? 'active' : ''} onClick={() => selectTab('users')}>Users</button>}
         </nav>
-        <button className="profile" onClick={changeUser} title="Use a different username"><span className="avatar">{(name || username).slice(0, 1).toUpperCase()}</span><span>{name || `@${username}`}</span><span className="switch">Switch</span></button>
+        <div className="account-menu" ref={accountMenuRef}>
+          <button type="button" className="profile" onClick={() => setIsAccountMenuOpen((isOpen) => !isOpen)} title="Account options" aria-haspopup="menu" aria-expanded={isAccountMenuOpen}>
+            <span className="avatar">{(name || username).slice(0, 1).toUpperCase()}</span><span>{name || `@${username}`}</span>
+          </button>
+          {isAccountMenuOpen && <div className="account-dropdown" role="menu" aria-label="Account options">
+            <button type="button" role="menuitem" onClick={() => { selectTab('profile'); setIsAccountMenuOpen(false) }}>Profile</button>
+            <button type="button" role="menuitem" onClick={changeUser}>Log out</button>
+          </div>}
+        </div>
       </header>
 
       {activeTab === 'weekly' ? <WeeklyMatchesPage sessions={weeklySessions} isLoading={isLoadingWeekly} actionPending={weeklyActionPending} onRegister={(sessionId) => updateWeeklyRegistration(sessionId, 'POST')} onWithdraw={(sessionId) => updateWeeklyRegistration(sessionId, 'DELETE')} onGenerate={generateWeeklyPairings} error={weeklyError} notice={notice} onCreate={() => { setWeeklyError(''); setActiveTab('weekly-create') }} onEdit={openWeeklyMatchEdit} isOrganizer={isOrganizer} onDelete={deleteWeeklyMatch} /> : activeTab === 'weekly-create' ? <WeeklyMatchCreatePage draft={weeklyDraft} onDraftChange={updateWeeklyDraft} onCreate={createWeeklyMatch} isCreating={isCreatingWeekly} error={weeklyError} onBack={() => selectTab('weekly')} /> : activeTab === 'weekly-edit' ? <WeeklyMatchCreatePage draft={weeklyDraft} onDraftChange={updateWeeklyDraft} onCreate={saveWeeklyMatch} isCreating={isCreatingWeekly} error={weeklyError} onBack={() => selectTab('weekly')} isEditing /> : activeTab === 'detail' ? (
