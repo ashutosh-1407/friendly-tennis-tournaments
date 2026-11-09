@@ -882,7 +882,6 @@ function App() {
   }, [tournamentDetail?.draw?.matches?.length, tournamentDetail?.draw?.rounds])
 
   function selectTab(tab) {
-    if (tab === 'tournaments') setTournamentFilter('current')
     setActiveTab(tab)
     setNotice('')
   }
