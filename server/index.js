@@ -698,7 +698,7 @@ app.get('/api/tournaments/:id', (req, res) => {
       COALESCE(m.status, CASE WHEN n.winner_user_id IS NOT NULL THEN 'completed' ELSE 'scheduled' END) AS status,
       p1.username AS player_one_name, p2.username AS player_two_name, p1.name AS player_one_display_name, p2.name AS player_two_display_name,
       tp1.seed AS player_one_seed, tp2.seed AS player_two_seed,
-      COALESCE(r.winner_user_id, n.winner_user_id) AS winner_user_id, COALESCE(NULLIF(winner.name, ''), winner.username) AS winner_name, r.player_one_score, r.player_two_score
+      COALESCE(r.winner_user_id, n.winner_user_id) AS winner_user_id, COALESCE(NULLIF(winner.name, ''), winner.username) AS winner_name, r.player_one_score, r.player_two_score, r.notes
     FROM tournament_draw_nodes n
     LEFT JOIN matches m ON m.tournament_id = n.tournament_id AND m.round_name = n.round_name AND m.match_order = n.match_order
     LEFT JOIN users p1 ON p1.id = n.player_one_id LEFT JOIN users p2 ON p2.id = n.player_two_id
@@ -708,7 +708,7 @@ app.get('/api/tournaments/:id', (req, res) => {
     LEFT JOIN users winner ON winner.id = COALESCE(r.winner_user_id, n.winner_user_id)
     WHERE n.tournament_id = ? ORDER BY n.round_name, n.match_order`).all(tournamentId) : db.prepare(`SELECT m.*, p1.username AS player_one_name, p2.username AS player_two_name, p1.name AS player_one_display_name, p2.name AS player_two_display_name,
       tp1.seed AS player_one_seed, tp2.seed AS player_two_seed,
-      r.winner_user_id, COALESCE(NULLIF(winner.name, ''), winner.username) AS winner_name, r.player_one_score, r.player_two_score
+      r.winner_user_id, COALESCE(NULLIF(winner.name, ''), winner.username) AS winner_name, r.player_one_score, r.player_two_score, r.notes
     FROM matches m
     JOIN users p1 ON p1.id = m.player_one_id JOIN users p2 ON p2.id = m.player_two_id
     LEFT JOIN tournament_players tp1 ON tp1.tournament_id = m.tournament_id AND tp1.user_id = m.player_one_id
@@ -1032,6 +1032,86 @@ app.post('/api/matches/:id/result', requireUser, (req, res) => {
   const sets = Array.isArray(req.body?.sets) ? req.body.sets : []
   const isSingleSet = tournament.tournament_tier === 'rally_250'
   const gamesToWin = setFormats[tournament.set_format]?.gamesToWin || setFormats.standard.gamesToWin
+  const retirement = req.body?.retirement
+  if (retirement) {
+    const retiredPlayerId = Number(retirement.retiredPlayerId)
+    if (![match.player_one_id, match.player_two_id].includes(retiredPlayerId)) return res.status(400).json({ error: 'Choose a player in this match who retired.' })
+    if (!['injury', 'withdrawal'].includes(retirement.reason)) return res.status(400).json({ error: 'Choose whether the player retired due to injury or withdrawal.' })
+
+    const isBlank = (value) => value === '' || value === null || value === undefined
+    const parseSet = (set) => {
+      const scoreFields = ['playerOneGames', 'playerTwoGames', 'tiebreakPlayerOne', 'tiebreakPlayerTwo']
+      if (scoreFields.every((field) => isBlank(set?.[field]))) return { blank: true }
+      if (isBlank(set?.playerOneGames) || isBlank(set?.playerTwoGames) || !/^\d+$/.test(String(set.playerOneGames)) || !/^\d+$/.test(String(set.playerTwoGames))) return { error: 'Enter both players’ game scores for each set played.' }
+      const one = Number(set.playerOneGames)
+      const two = Number(set.playerTwoGames)
+      if (one + two === 0 || one > gamesToWin + 1 || two > gamesToWin + 1) return { error: 'The partial set score is not valid.' }
+      const hasTieOne = !isBlank(set.tiebreakPlayerOne)
+      const hasTieTwo = !isBlank(set.tiebreakPlayerTwo)
+      if (hasTieOne !== hasTieTwo) return { error: 'Enter both players’ tiebreak points.' }
+      const isTiebreakScore = (one === gamesToWin + 1 && two === gamesToWin) || (two === gamesToWin + 1 && one === gamesToWin)
+      if (hasTieOne && (!/^\d+$/.test(String(set.tiebreakPlayerOne)) || !/^\d+$/.test(String(set.tiebreakPlayerTwo)) || !isTiebreakScore)) return { error: 'Tiebreak points can only be entered for a tiebreak set.' }
+      const complete = validSet(set, gamesToWin)
+      const tieComplete = hasTieOne && validTiebreak(Number(set.tiebreakPlayerOne), Number(set.tiebreakPlayerTwo), 7)
+      if (tieComplete && !complete) return { error: 'The tiebreak points do not match the recorded set winner.' }
+      return { complete }
+    }
+    const scoreRows = sets.slice(0, isSingleSet ? 1 : 2)
+    let foundPartial = false
+    let foundScore = false
+    let playerOneSets = 0
+    let playerTwoSets = 0
+    for (const set of scoreRows) {
+      const parsed = parseSet(set)
+      if (parsed.error) return res.status(400).json({ error: parsed.error })
+      if (parsed.blank) {
+        foundPartial = true
+        continue
+      }
+      if (foundPartial) return res.status(400).json({ error: 'Enter completed sets in order and leave unplayed sets blank.' })
+      foundScore = true
+      if (parsed.complete) {
+        if (Number(set.playerOneGames) > Number(set.playerTwoGames)) playerOneSets += 1
+        else playerTwoSets += 1
+      } else {
+        foundPartial = true
+      }
+    }
+    if (!foundScore) return res.status(400).json({ error: 'Enter the score reached before the player retired.' })
+    if (isSingleSet && playerOneSets + playerTwoSets === 1) return res.status(400).json({ error: 'The entered score already completes the match.' })
+    if (!isSingleSet && (playerOneSets === 2 || playerTwoSets === 2)) return res.status(400).json({ error: 'The entered score already completes the match.' })
+
+    const matchTiebreak = sets[2]
+    const hasMatchTiebreakOne = !isBlank(matchTiebreak?.playerOnePoints)
+    const hasMatchTiebreakTwo = !isBlank(matchTiebreak?.playerTwoPoints)
+    const hasMatchTiebreak = hasMatchTiebreakOne || hasMatchTiebreakTwo
+    if (hasMatchTiebreakOne !== hasMatchTiebreakTwo) return res.status(400).json({ error: 'Enter both players’ match tiebreak points.' })
+    if (hasMatchTiebreak) {
+      if (isSingleSet || foundPartial || playerOneSets !== 1 || playerTwoSets !== 1 || !/^\d+$/.test(String(matchTiebreak.playerOnePoints)) || !/^\d+$/.test(String(matchTiebreak.playerTwoPoints))) return res.status(400).json({ error: 'Match tiebreak points are only valid after the first two sets are split.' })
+      const tieOne = Number(matchTiebreak.playerOnePoints)
+      const tieTwo = Number(matchTiebreak.playerTwoPoints)
+      if (tieOne > 30 || tieTwo > 30) return res.status(400).json({ error: 'The partial match tiebreak score is not valid.' })
+      if (validTiebreak(tieOne, tieTwo, 10)) return res.status(400).json({ error: 'The entered score already completes the match.' })
+    }
+
+    const scoreFor = (player) => scoreRows.filter((set) => !['playerOneGames', 'playerTwoGames'].every((field) => isBlank(set?.[field]))).map((set) => {
+      const games = player === 1 ? set.playerOneGames : set.playerTwoGames
+      const tie = player === 1 ? set.tiebreakPlayerOne : set.tiebreakPlayerTwo
+      return !isBlank(tie) ? `${games}(${tie})` : games
+    }).concat(hasMatchTiebreak ? [`[${player === 1 ? matchTiebreak.playerOnePoints : matchTiebreak.playerTwoPoints}]`] : []).join(' ')
+    const winnerUserId = retiredPlayerId === match.player_one_id ? match.player_two_id : match.player_one_id
+    const note = `Retired (${retirement.reason})`
+    const saveRetirement = db.transaction(() => {
+      db.prepare(`INSERT INTO match_results (match_id, winner_user_id, player_one_score, player_two_score, notes)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(match_id) DO UPDATE SET winner_user_id = excluded.winner_user_id, player_one_score = excluded.player_one_score, player_two_score = excluded.player_two_score, notes = excluded.notes, reported_at = CURRENT_TIMESTAMP`).run(match.id, winnerUserId, scoreFor(1), scoreFor(2), note)
+      db.prepare("UPDATE matches SET status = 'completed' WHERE id = ?").run(match.id)
+      advanceWinner(match, winnerUserId)
+      recalculateTournamentPoints(match.tournament_id)
+    })
+    saveRetirement()
+    return res.json({ completed: true, winnerUserId, retirement: retirement.reason })
+  }
   if (isSingleSet && (sets.length !== 1 || !validSet(sets[0], gamesToWin))) return res.status(400).json({ error: `Enter one valid first-to-${gamesToWin} tennis set score.` })
   if (!isSingleSet && (sets.length !== 3 || !validSet(sets[0], gamesToWin) || !validSet(sets[1], gamesToWin))) return res.status(400).json({ error: `Enter two valid first-to-${gamesToWin} tennis set scores.` })
   const firstTwoWinners = sets.slice(0, isSingleSet ? 1 : 2).map((set) => Number(set.playerOneGames) > Number(set.playerTwoGames) ? 1 : 2)
@@ -1172,7 +1252,7 @@ app.get('/api/profile', requireUser, (req, res) => {
     JOIN tournaments t ON t.id = tp.tournament_id
     WHERE tp.user_id = ? AND tp.registration_status = 'registered'
     ORDER BY t.starts_at DESC`).all(user.id)
-  const matches = db.prepare(`SELECT m.id, m.tournament_id, m.round_name, m.status, m.player_one_id, r.winner_user_id,
+  const matches = db.prepare(`SELECT m.id, m.tournament_id, m.round_name, m.status, m.player_one_id, r.winner_user_id, r.notes,
       r.player_one_score, r.player_two_score,
       CASE WHEN m.player_one_id = ? THEN COALESCE(NULLIF(p2.name, ''), p2.username) ELSE COALESCE(NULLIF(p1.name, ''), p1.username) END AS opponent_name
     FROM matches m
@@ -1188,7 +1268,8 @@ app.get('/api/profile', requireUser, (req, res) => {
     const pointsByRound = pointsByTournamentRound(tournament?.tournament_tier, fieldSize)
     const won = match.winner_user_id === user.id
     const userIsPlayerOne = match.player_one_id === user.id
-    const item = { ...match, won, player_score: userIsPlayerOne ? match.player_one_score : match.player_two_score, opponent_score: userIsPlayerOne ? match.player_two_score : match.player_one_score, points_earned: won ? (pointsByRound[match.round_name] || 0) : 0 }
+    const retirementReason = match.notes?.match(/^Retired \((injury|withdrawal)\)$/)?.[1] || null
+    const item = { ...match, won, retirement_reason: retirementReason, player_score: userIsPlayerOne ? match.player_one_score : match.player_two_score, opponent_score: userIsPlayerOne ? match.player_two_score : match.player_one_score, points_earned: won ? (pointsByRound[match.round_name] || 0) : 0 }
     matchesByTournament.set(match.tournament_id, [...(matchesByTournament.get(match.tournament_id) || []), item])
   }
   res.json({ user, tournaments: tournaments.map((tournament) => ({ ...tournament, matches: matchesByTournament.get(tournament.id) || [] })) })
