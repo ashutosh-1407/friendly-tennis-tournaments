@@ -67,6 +67,16 @@ button { cursor: pointer; }
 
 .retirement-toggle { display: flex; align-items: center; gap: 9px; margin: 0 0 14px; color: #345047; font-size: 13px; font-weight: 600; }.retirement-toggle input { width: 16px; height: 16px; accent-color: #6f944c; }.retirement-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 0 18px; }.retirement-fields label { display: grid; gap: 6px; color: #526760; font-size: 12px; font-weight: 600; }.retirement-fields select { width: 100%; height: 38px; border: 1px solid #ccd7d0; border-radius: 5px; padding: 0 9px; color: #193d34; background: #fff; }
 @media (max-width: 480px) { .retirement-fields { grid-template-columns: 1fr; } }
+@media (max-width: 620px) {
+  .profile-tournament-head { gap: 10px; padding: 16px; }
+  .profile-tournament-head > div { min-width: 0; }
+  .profile-tournament-head h2 { overflow-wrap: anywhere; font-size: 19px; }
+  .profile-match { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "round points" "result score"; gap: 7px 10px; padding: 12px 14px; }
+  .profile-match > span:first-child { grid-area: round; }
+  .profile-match > div { grid-area: result; min-width: 0; overflow-wrap: anywhere; }
+  .profile-match > span:nth-of-type(2) { grid-area: score; justify-self: end; }
+  .profile-match > b { grid-area: points; justify-self: end; }
+}
 
 .bracket-player--champion > .champion-confetti { position: absolute; z-index: 0; inset: 0; overflow: hidden; background: none; animation: none; }.champion-confetti i { position: absolute; top: -9px; display: block; width: 5px; height: 8px; border-radius: 1px; background: #e27d5f; animation: champion-confetti-fall 2.4s linear infinite both; }.champion-confetti i:nth-child(3n + 1) { background: #e27d5f; }.champion-confetti i:nth-child(3n + 2) { background: #91ad58; width: 4px; height: 6px; }.champion-confetti i:nth-child(3n) { background: #7fadd0; width: 5px; height: 5px; border-radius: 50%; }@keyframes champion-confetti-fall { 0% { opacity: 0; transform: translateY(0) rotate(0deg); } 12% { opacity: 1; } 88% { opacity: 1; } 100% { opacity: 0; transform: translateY(60px) rotate(540deg); } }@media (prefers-reduced-motion: reduce) { .champion-confetti i { animation: none; opacity: 0; } }
 .bracket-player--winner > span::after { content: ' ✓'; color: #5d883e; }.bracket-player--champion > span::after, .bracket-player--champion .champion-trophy::after { content: none; }.champion-trophy { display: inline-block; margin-left: 4px; font-size: 1em; vertical-align: -1px; }
